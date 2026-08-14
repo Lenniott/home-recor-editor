@@ -1,0 +1,97 @@
+/*
+  Palette mirrors src/lib/theme.ts — the waveform canvas reads that module
+  directly since CSS custom properties aren't visible to canvas drawing.
+*/
+:root {
+  --chassis: #17150f;
+  --panel: #241f1a;
+  --panel-line: #3a332a;
+  --panel-highlight: #4a4132;
+
+  --cream: #f2e6d0;
+  --cream-dim: #b8ac96;
+  --amber: #e2a33c;
+  --in-color: #d1495b;
+  --out-color: #3fa79a;
+
+  --font-label: ui-sans-serif, system-ui, "Segoe UI", sans-serif;
+  --font-mono: ui-monospace, "SF Mono", "Cascadia Code", "Roboto Mono", monospace;
+
+  color-scheme: dark;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+  background: var(--chassis);
+  color: var(--cream);
+  font-family: var(--font-label);
+  -webkit-font-smoothing: antialiased;
+}
+
+button {
+  font-family: var(--font-label);
+  font-size: 0.8rem;
+  letter-spacing: 0.03em;
+  color: var(--cream);
+  background: linear-gradient(180deg, #35302a, #262220);
+  border: 1px solid var(--panel-line);
+  border-radius: 5px;
+  padding: 0.5rem 0.9rem;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+}
+
+button:hover:not(:disabled) {
+  border-color: var(--panel-highlight);
+  background: linear-gradient(180deg, #3d372f, #2c2723);
+}
+
+button:active:not(:disabled) {
+  background: #201c19;
+}
+
+button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+input[type="range"] {
+  appearance: none;
+  height: 4px;
+  background: var(--panel-line);
+  border-radius: 2px;
+  outline: none;
+}
+
+input[type="range"]::-webkit-slider-thumb {
+  appearance: none;
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  background: var(--amber);
+  border: 2px solid #17150f;
+  cursor: pointer;
+}
+
+input[type="range"]::-moz-range-thumb {
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  background: var(--amber);
+  border: 2px solid #17150f;
+  cursor: pointer;
+}
+
+input[type="range"]:disabled::-webkit-slider-thumb {
+  background: var(--cream-dim);
+}
+
+input[type="checkbox"] {
+  accent-color: var(--amber);
+}
