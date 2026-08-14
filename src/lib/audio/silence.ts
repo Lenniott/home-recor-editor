@@ -94,3 +94,66 @@ export function moveSilenceMarker(
   const end = Math.max(raw.start, newDisplayedSeconds + bufferSec);
   return { start: raw.start, end };
 }
+
+/**
+ * Add [start, end] to a set of raw regions, merging it with any region it
+ * touches or overlaps so the set never holds redundant overlapping entries.
+ * This is how a manual "Mark" drag joins up with Detect's output (or with
+ * a previous manual mark) instead of stacking duplicate bands.
+ */
+export function unionInterval(
+  regions: RawSilenceRegion[],
+  start: number,
+  end: number,
+): RawSilenceRegion[] {
+  if (end <= start) return [...regions];
+
+  const merged: RawSilenceRegion[] = [];
+  let pendingStart = start;
+  let pendingEnd = end;
+
+  for (const region of [...regions].sort((a, b) => a.start - b.start)) {
+    if (region.end < pendingStart) {
+      merged.push(region);
+    } else if (region.start > pendingEnd) {
+      merged.push({ start: pendingStart, end: pendingEnd });
+      pendingStart = region.start;
+      pendingEnd = region.end;
+    } else {
+      pendingStart = Math.min(pendingStart, region.start);
+      pendingEnd = Math.max(pendingEnd, region.end);
+    }
+  }
+  merged.push({ start: pendingStart, end: pendingEnd });
+
+  return merged.sort((a, b) => a.start - b.start);
+}
+
+/**
+ * Remove [start, end] from a set of raw regions. A range that carves out
+ * the middle of a region splits it in two (e.g. marked 1-10, unmark 4-6
+ * leaves 1-4 and 6-10); a range that only touches an edge trims that
+ * region; a range that fully covers a region drops it.
+ */
+export function subtractInterval(
+  regions: RawSilenceRegion[],
+  start: number,
+  end: number,
+): RawSilenceRegion[] {
+  if (end <= start) return [...regions];
+
+  const result: RawSilenceRegion[] = [];
+  for (const region of regions) {
+    if (end <= region.start || start >= region.end) {
+      result.push(region);
+      continue;
+    }
+    if (start > region.start) {
+      result.push({ start: region.start, end: start });
+    }
+    if (end < region.end) {
+      result.push({ start: end, end: region.end });
+    }
+  }
+  return result.sort((a, b) => a.start - b.start);
+}

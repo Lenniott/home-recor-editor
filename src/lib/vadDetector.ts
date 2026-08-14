@@ -48,6 +48,18 @@ export class VadDetector {
     });
   }
 
+  /**
+   * Create the worker ahead of time, before the user ever clicks Detect.
+   * In dev, spinning it up is what makes Vite discover and pre-bundle
+   * @ricky0123/vad-web — if that first happens mid-session (e.g. right
+   * after loading a take), the resulting dependency-optimize reload wipes
+   * the app's in-memory state. Calling this once at app start moves that
+   * cost to boot time, before there's anything loaded to lose.
+   */
+  warmUp(): void {
+    this.getWorker();
+  }
+
   private getWorker(): Worker {
     if (!this.worker) {
       this.worker = new Worker(new URL("./audio/vadWorker.ts", import.meta.url), {

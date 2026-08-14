@@ -7,8 +7,16 @@ export const theme = {
   panel: "#241f1a",
   cream: "#f2e6d0",
   amber: "#e2a33c",
-  silenceShade: "rgba(0, 0, 0, 0.38)",
+  /** Fill + hatch stroke for marked (silence) regions — teal, not another shade of black, so they read as a distinct state rather than a dim waveform. */
+  markedFill: "rgba(63, 167, 154, 0.30)",
+  markedHatch: "rgba(63, 167, 154, 0.65)",
+  markedBorder: "rgba(63, 167, 154, 0.9)",
+  /** Dashed hint at the raw (pre-buffer) VAD-detected extent — the fill itself only covers the buffer-adjusted, conservative "safe to cut" zone. */
+  markedRawExtent: "rgba(63, 167, 154, 0.45)",
   outsideShade: "rgba(0, 0, 0, 0.45)",
+  /** Pending drag-to-select range, before Mark/Unmark is applied. */
+  selectionFill: "rgba(242, 230, 208, 0.22)",
+  selectionBorder: "rgba(242, 230, 208, 0.9)",
   in: "#d1495b",
   out: "#3fa79a",
   grid: "rgba(242, 230, 208, 0.08)",

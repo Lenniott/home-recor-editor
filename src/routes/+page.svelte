@@ -4,9 +4,14 @@
   import { decodeAudioFile, mixToMono } from "$lib/audio/decode";
   import { editor } from "$lib/editor.svelte";
   import { player } from "$lib/player";
+  import { vadDetector } from "$lib/vadDetector";
   import Waveform from "$lib/components/Waveform.svelte";
   import SilenceControls from "$lib/components/SilenceControls.svelte";
   import Transport from "$lib/components/Transport.svelte";
+
+  // Spin up the VAD worker at app start rather than waiting for the first
+  // Detect click — see vadDetector.warmUp() for why that timing matters.
+  vadDetector.warmUp();
 
   let isLoading = $state(false);
   let loadError: string | null = $state(null);
@@ -54,6 +59,11 @@
     if (e.code === "Space" && !isFormField) {
       e.preventDefault();
       player.toggle();
+    } else if (e.code === "Escape" && editor.hasSelection) {
+      editor.clearSelection();
+    } else if (e.key.toLowerCase() === "m" && !isFormField && editor.hasSelection) {
+      e.preventDefault();
+      editor.toggleSelectionMark();
     }
   }
 </script>

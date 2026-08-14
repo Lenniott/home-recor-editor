@@ -20,9 +20,16 @@ export async function decodeAudioFile(
   return audioContext.decodeAudioData(arrayBuffer);
 }
 
-/** Average all channels down to one, for silence analysis and mono waveform painting. */
+/**
+ * Average all channels down to one, for silence analysis and mono waveform
+ * painting. Always returns a fresh Float32Array — for a mono file,
+ * `getChannelData(0)` would otherwise hand back the AudioBuffer's own
+ * backing storage, and anything that later transfers `monoSamples` (e.g. a
+ * zero-copy postMessage) would detach the AudioBuffer's memory along with
+ * it, silently blanking playback and the waveform.
+ */
 export function mixToMono(buffer: AudioBuffer): Float32Array {
-  if (buffer.numberOfChannels === 1) return buffer.getChannelData(0);
+  if (buffer.numberOfChannels === 1) return buffer.getChannelData(0).slice();
 
   const mono = new Float32Array(buffer.length);
   for (let ch = 0; ch < buffer.numberOfChannels; ch++) {
