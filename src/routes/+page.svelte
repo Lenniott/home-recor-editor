@@ -126,6 +126,12 @@
       e.preventDefault();
       editor.toggleSelectionMark();
       player.refreshIfPlaying();
+    } else if (key === "]" && !isFormField) {
+      e.preventDefault();
+      player.goToAdjacentMarkedRegion("next");
+    } else if (key === "[" && !isFormField) {
+      e.preventDefault();
+      player.goToAdjacentMarkedRegion("prev");
     }
   }
 </script>

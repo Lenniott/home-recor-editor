@@ -1,3 +1,4 @@
+import type { NavDirection } from "./audio/markerNav";
 import { buildPlaybackPlan, type PlaybackPlan } from "./audio/playbackPlan";
 import { editor, type EditorState } from "./editor.svelte";
 
@@ -113,6 +114,21 @@ export class AudioPlayer {
    */
   refreshIfPlaying(): void {
     if (this.editor.isPlaying) this.seek(this.editor.playheadSec);
+  }
+
+  /**
+   * Step to the next/prev marked region and land there: reset the view
+   * filter, zoom to fit (`EditorState.goToAdjacentMarkedRegion`), then
+   * seek the playhead. Wrapped in one `beginEdit`/`endEdit` transaction —
+   * same pattern as a waveform click-seek — so the filter reset, the
+   * zoom, and the playhead move undo together as a single step. No-op
+   * when there are no marked regions.
+   */
+  goToAdjacentMarkedRegion(direction: NavDirection): void {
+    this.editor.beginEdit();
+    const inSec = this.editor.goToAdjacentMarkedRegion(direction);
+    if (inSec !== null) this.seek(inSec);
+    this.editor.endEdit();
   }
 
   /** Elapsed context time since the current plan started, converted back to a source-buffer position. */

@@ -1,3 +1,4 @@
+import { adjacentMarkedRegion, fitWindow, type NavDirection } from "./audio/markerNav";
 import {
   applySilenceBuffer,
   moveMarker,
@@ -584,6 +585,34 @@ export class EditorState {
     const maxStart = Math.max(0, total - durationSec);
     this.viewStartSec = clamp(startSec, 0, maxStart);
     this.viewDurationSec = clamp(durationSec, 0, total || durationSec);
+  }
+
+  /**
+   * Jump to the next/prev marked region relative to wherever the playhead
+   * is right now (see `adjacentMarkedRegion`) and zoom to fit it. Forces
+   * `viewFilter` back to "all" first — under `hideMarked` the target
+   * region is collapsed to zero kept width (nothing to fit), and under
+   * `hideUnmarked` the padding would pull in neighboring kept content
+   * unrelated to this region in source time. `muteMarked` is untouched;
+   * it only affects playback, not what's visible/navigable.
+   *
+   * Does not move the playhead itself — that's `AudioPlayer.seek`'s job
+   * (it also reschedules audio if already playing). Returns the region's
+   * start for the caller to seek to, or null if there are no marked
+   * regions. Callers should wrap this and the following seek in their own
+   * `beginEdit`/`endEdit` so the filter reset, the zoom, and the playhead
+   * move land as one undo step — see `AudioPlayer.goToAdjacentMarkedRegion`.
+   */
+  goToAdjacentMarkedRegion(direction: NavDirection): number | null {
+    const region = adjacentMarkedRegion(this.markedIntervals, this.playheadSec, direction);
+    if (!region) return null;
+
+    this.commitEdit(() => {
+      this.viewFilter = "all";
+      const { startSec, durationSec } = fitWindow(region, this.durationSec);
+      this.setView(startSec, durationSec);
+    });
+    return region.start;
   }
 }
 

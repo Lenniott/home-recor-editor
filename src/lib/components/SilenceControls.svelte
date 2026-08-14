@@ -1,8 +1,10 @@
 <script lang="ts">
+  import { currentRegionNumber } from "../audio/markerNav";
   import { editor, type ViewFilter } from "../editor.svelte";
   import { player } from "../player";
 
   const markerCount = $derived(editor.markers.filter((r) => r.displayed).length);
+  const currentNumber = $derived(currentRegionNumber(editor.markedIntervals, editor.playheadSec));
 
   const VIEW_FILTERS: { value: ViewFilter; label: string }[] = [
     { value: "all", label: "All" },
@@ -119,6 +121,30 @@
 
   <span class="count">{markerCount} region{markerCount === 1 ? "" : "s"}</span>
 
+  <div class="control marker-nav" role="group" aria-label="Marker region navigation">
+    <button
+      type="button"
+      class="nav-step"
+      onclick={() => player.goToAdjacentMarkedRegion("prev")}
+      disabled={markerCount === 0}
+      title="Previous marked region (shortcut: [)"
+      aria-label="Previous marked region"
+    >
+      ◀
+    </button>
+    <span class="nav-readout">{currentNumber ?? "–"} / {markerCount}</span>
+    <button
+      type="button"
+      class="nav-step"
+      onclick={() => player.goToAdjacentMarkedRegion("next")}
+      disabled={markerCount === 0}
+      title="Next marked region (shortcut: ])"
+      aria-label="Next marked region"
+    >
+      ▶
+    </button>
+  </div>
+
   <div class="control view-filter">
     <span class="label">View</span>
     <div class="segmented" role="group" aria-label="Timeline view filter">
@@ -214,6 +240,25 @@
     font-size: 0.75rem;
     color: var(--cream-dim);
     white-space: nowrap;
+  }
+
+  .marker-nav {
+    gap: 0.4rem;
+  }
+
+  .nav-step {
+    font-size: 0.72rem;
+    padding: 0.3rem 0.55rem;
+    line-height: 1;
+  }
+
+  .nav-readout {
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    color: var(--amber);
+    white-space: nowrap;
+    min-width: 3.5ch;
+    text-align: center;
   }
 
   .detect-error {
