@@ -1,3 +1,5 @@
+import { removeMarked, silenceMarked } from "./audio/applyEdits";
+import { mixToMono } from "./audio/decode";
 import { adjacentMarkedRegion, fitWindow, type NavDirection } from "./audio/markerNav";
 import {
   applySilenceBuffer,
@@ -316,22 +318,80 @@ export class EditorState {
     this.fileName = fileName;
     this.filePath = filePath;
     this.monoSamples = monoSamples;
+    this.resetSessionState(buffer.duration);
+    // A freshly opened recording is a new document — Cmd+Z should never
+    // reach back past it into whatever the previous take had.
+    this.history.clear();
+  }
+
+  /**
+   * Swap the loaded take for a rewritten buffer — where `applySilenceMarked`
+   * and `applyRemoveMarked` land once they've baked their edit into new
+   * PCM. Keeps `fileName`/`filePath` (still the same recording), but
+   * otherwise resets like `loadAudio`: a rewritten buffer invalidates the
+   * marks, IN/OUT, and view/filter state built against the old one, and
+   * there's no undo across the rewrite (see those methods).
+   */
+  replaceAudio(buffer: AudioBuffer, monoSamples: Float32Array): void {
+    this.audioBuffer = buffer;
+    this.monoSamples = monoSamples;
+    this.resetSessionState(buffer.duration);
+    this.history.clear();
+  }
+
+  private resetSessionState(durationSec: number): void {
     this.playheadSec = 0;
     this.isPlaying = false;
     this.rawMarkers = [];
     this.detectionProgress = 0;
     this.detectionError = null;
     this.inSec = 0;
-    this.outSec = buffer.duration;
+    this.outSec = durationSec;
     this.viewFilter = "all";
     this.muteMarked = false;
     this.viewStartSec = 0;
-    this.viewDurationSec = buffer.duration;
+    this.viewDurationSec = durationSec;
     this.selectionStartSec = null;
     this.selectionEndSec = null;
-    // A freshly opened recording is a new document — Cmd+Z should never
-    // reach back past it into whatever the previous take had.
-    this.history.clear();
+  }
+
+  /**
+   * Bake "Mute marked" into the buffer: zero every marked span with a
+   * 100ms edge fade, same duration in and out (see
+   * `applyEdits.silenceMarked`). No-op without audio or a displayed
+   * marked region. No undo — an hour-long stereo take is already ~1GB in
+   * RAM, too much to keep a spare copy around for; re-open the file to
+   * revert.
+   */
+  applySilenceMarked(): void {
+    if (!this.hasAudio || this.markedIntervals.length === 0) return;
+    this.rewriteBuffer((channels) => silenceMarked(channels, this.sampleRate, this.markedIntervals));
+  }
+
+  /**
+   * Bake "Hide marked" into the buffer: concatenate the kept spans,
+   * fading each join so the splice doesn't click — duration shortens (see
+   * `applyEdits.removeMarked`). No-op without audio or a displayed marked
+   * region; throws if every region is marked, since nothing would remain.
+   */
+  applyRemoveMarked(): void {
+    if (!this.hasAudio || this.markedIntervals.length === 0) return;
+    this.rewriteBuffer((channels) => removeMarked(channels, this.sampleRate, this.markedIntervals));
+  }
+
+  /** Copy the current buffer's channels out (never mutate the live buffer in place), run `edit`, and swap in the result via `replaceAudio`. */
+  private rewriteBuffer(edit: (channels: Float32Array[]) => Float32Array[]): void {
+    const source = this.audioBuffer;
+    if (!source) return;
+    const channels = Array.from({ length: source.numberOfChannels }, (_, i) => source.getChannelData(i).slice());
+    const edited = edit(channels);
+    const buffer = new AudioBuffer({
+      numberOfChannels: edited.length,
+      length: edited[0]?.length ?? 0,
+      sampleRate: source.sampleRate,
+    });
+    edited.forEach((data, i) => buffer.copyToChannel(data, i));
+    this.replaceAudio(buffer, mixToMono(buffer));
   }
 
   /** Snapshot of everything a sidecar save persists — see `projectFile.ts`. */

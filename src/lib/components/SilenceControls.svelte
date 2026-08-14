@@ -6,6 +6,8 @@
   const markerCount = $derived(editor.markers.filter((r) => r.displayed).length);
   const currentNumber = $derived(currentRegionNumber(editor.markedIntervals, editor.playheadSec));
 
+  let applyError: string | null = $state(null);
+
   const VIEW_FILTERS: { value: ViewFilter; label: string }[] = [
     { value: "all", label: "All" },
     { value: "hideMarked", label: "Hide marked" },
@@ -20,6 +22,31 @@
   function toggleMuteMarked(): void {
     editor.setMuteMarked(!editor.muteMarked);
     player.refreshIfPlaying();
+  }
+
+  // Destructive: no undo copy of the buffer (see `EditorState.applySilenceMarked`),
+  // so a confirm() is the only safety net. Pause first so playback isn't
+  // scheduled against a buffer that's about to disappear.
+  function applySilence(): void {
+    if (!confirm("Apply silence to marked regions? This can't be undone — re-open the file to revert.")) return;
+    applyError = null;
+    player.pause();
+    try {
+      editor.applySilenceMarked();
+    } catch (err) {
+      applyError = err instanceof Error ? err.message : String(err);
+    }
+  }
+
+  function applyRemove(): void {
+    if (!confirm("Remove marked regions? This can't be undone — re-open the file to revert.")) return;
+    applyError = null;
+    player.pause();
+    try {
+      editor.applyRemoveMarked();
+    } catch (err) {
+      applyError = err instanceof Error ? err.message : String(err);
+    }
   }
 
   function markSelection(): void {
@@ -205,6 +232,31 @@
     {editor.muteMarked ? "Marked muted" : "Mute marked"}
   </button>
 
+  <div class="apply-actions">
+    <button
+      type="button"
+      class="apply apply-silence"
+      onclick={applySilence}
+      disabled={!editor.hasAudio || markerCount === 0}
+      title="Bake silence into marked regions — same length, can't be undone"
+    >
+      Apply silence
+    </button>
+    <button
+      type="button"
+      class="apply apply-remove"
+      onclick={applyRemove}
+      disabled={!editor.hasAudio || markerCount === 0}
+      title="Cut marked regions out — shortens the file, can't be undone"
+    >
+      Apply remove
+    </button>
+  </div>
+
+  {#if applyError}
+    <span class="detect-error">{applyError}</span>
+  {/if}
+
   {#if editor.detectionError}
     <span class="detect-error">{editor.detectionError}</span>
   {/if}
@@ -340,6 +392,22 @@
     color: var(--out-color);
     border-color: var(--out-color);
     background: rgba(63, 167, 154, 0.16);
+  }
+
+  .apply-actions {
+    display: flex;
+    gap: 0.4rem;
+  }
+
+  .apply {
+    font-size: 0.75rem;
+    white-space: nowrap;
+    color: var(--in-color);
+    border-color: var(--in-color);
+  }
+
+  .apply:hover:not(:disabled) {
+    background: rgba(209, 73, 91, 0.16);
   }
 
   .selection-actions {

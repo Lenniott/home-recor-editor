@@ -1,7 +1,8 @@
 <script lang="ts">
-  import { open } from "@tauri-apps/plugin-dialog";
+  import { open, save } from "@tauri-apps/plugin-dialog";
   import { invoke } from "@tauri-apps/api/core";
   import { decodeAudioFile, mixToMono } from "$lib/audio/decode";
+  import { encodeWav } from "$lib/audio/encodeWav";
   import { editor } from "$lib/editor.svelte";
   import { player } from "$lib/player";
   import { parseProjectFile, serializeProject, sidecarPath } from "$lib/projectFile";
@@ -19,6 +20,8 @@
   let isSaving = $state(false);
   let saveStatus: string | null = $state(null);
   let saveStatusTimeout: ReturnType<typeof setTimeout> | undefined;
+  let isExporting = $state(false);
+  let exportError: string | null = $state(null);
 
   async function openRecording(): Promise<void> {
     loadError = null;
@@ -86,6 +89,46 @@
     }
   }
 
+  /**
+   * Encodes `editor.audioBuffer` (the current take, including any applied
+   * silence/remove edits — never the preview) and writes it to a
+   * user-chosen path. `write_audio_file` takes the encoded bytes as a raw
+   * binary IPC body rather than a JSON args object — see its Rust-side
+   * comment — so `wavBytes` is passed directly as `invoke`'s args and the
+   * destination path rides along as a header instead.
+   */
+  async function exportRecording(): Promise<void> {
+    const buffer = editor.audioBuffer;
+    if (!buffer || isExporting) return;
+
+    exportError = null;
+    const stem = (editor.fileName ?? "export").replace(/\.[^./\\]+$/, "");
+    let destination: string | null;
+    try {
+      destination = await save({
+        defaultPath: `${stem}.wav`,
+        filters: [{ name: "WAV", extensions: ["wav"] }],
+      });
+    } catch (err) {
+      exportError = describeError(err);
+      return;
+    }
+    if (!destination) return;
+
+    isExporting = true;
+    saveStatus = null;
+    try {
+      const channels = Array.from({ length: buffer.numberOfChannels }, (_, i) => buffer.getChannelData(i));
+      const wavBytes = encodeWav(channels, buffer.sampleRate);
+      await invoke("write_audio_file", wavBytes, { headers: { path: destination } });
+      showSaveStatus("Exported");
+    } catch (err) {
+      exportError = describeError(err);
+    } finally {
+      isExporting = false;
+    }
+  }
+
   function showSaveStatus(message: string): void {
     saveStatus = message;
     clearTimeout(saveStatusTimeout);
@@ -147,6 +190,9 @@
       <button class="save" onclick={saveProject} disabled={!editor.filePath || isSaving}>
         {isSaving ? "Saving…" : "Save"}
       </button>
+      <button class="export" onclick={exportRecording} disabled={!editor.hasAudio || isExporting}>
+        {isExporting ? "Exporting…" : "Export"}
+      </button>
       <span class="filename">{editor.fileName ?? "No recording loaded"}</span>
       {#if saveStatus}
         <span class="save-status">{saveStatus}</span>
@@ -165,6 +211,9 @@
 
   {#if loadError}
     <p class="error">{loadError}</p>
+  {/if}
+  {#if exportError}
+    <p class="error">Export failed: {exportError}</p>
   {/if}
 </main>
 

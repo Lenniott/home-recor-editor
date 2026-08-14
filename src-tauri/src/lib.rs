@@ -36,6 +36,29 @@ fn write_text_file(path: &str, contents: &str) -> Result<(), String> {
     std::fs::write(path, contents).map_err(|err| err.to_string())
 }
 
+// Writes an exported recording to a user-chosen path (from the save
+// dialog, same trust model as `read_audio_file`'s open). Mirrors
+// `read_audio_file`'s raw `ipc::Response` trick in reverse: a plain
+// `Vec<u8>` argument would get JSON-serialized as a comma-separated array
+// of numbers on the way in, which grinds to a halt on an hour-long
+// recording (hundreds of MB) same as it did on the way out. Taking
+// `tauri::ipc::Request` instead lets the frontend send the encoded WAV as
+// a raw binary body; since a raw body can't carry named arguments
+// alongside it, the destination path rides in as an IPC header.
+#[tauri::command]
+fn write_audio_file(request: tauri::ipc::Request<'_>) -> Result<(), String> {
+    let path = request
+        .headers()
+        .get("path")
+        .ok_or_else(|| "missing path header".to_string())?
+        .to_str()
+        .map_err(|err| err.to_string())?;
+    match request.body() {
+        tauri::ipc::InvokeBody::Raw(bytes) => std::fs::write(path, bytes).map_err(|err| err.to_string()),
+        _ => Err("expected a raw binary body".to_string()),
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -44,7 +67,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             read_audio_file,
             read_text_file,
-            write_text_file
+            write_text_file,
+            write_audio_file
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
