@@ -1,17 +1,20 @@
+import { buildPlaybackPlan, type PlaybackPlan } from "./audio/playbackPlan";
 import { editor, type EditorState } from "./editor.svelte";
 
 /**
  * Owns the AudioContext / AudioBufferSourceNode lifecycle and keeps
  * `editor.playheadSec` moving while a take plays. Callers only ever need
- * play / pause / toggle / seek — everything about scheduling nodes and
- * polling elapsed time stays behind that interface.
+ * play / pause / toggle / seek — everything about scheduling nodes,
+ * skipping hidden spans, ducking marked audio, and polling elapsed time
+ * stays behind that interface.
  */
 export class AudioPlayer {
   private readonly editor: EditorState;
   private context: AudioContext | null = null;
-  private sourceNode: AudioBufferSourceNode | null = null;
-  private startedAtContextTime = 0;
-  private startedAtPlayheadSec = 0;
+  private sourceNodes: AudioBufferSourceNode[] = [];
+  private gainNode: GainNode | null = null;
+  private plan: PlaybackPlan | null = null;
+  private planContextStart = 0;
   private rafHandle: number | null = null;
 
   constructor(editor: EditorState) {
@@ -35,30 +38,59 @@ export class AudioPlayer {
 
     const context = this.getContext();
     void context.resume();
-    this.stopSource();
+    this.stopSources();
 
-    const atEnd = this.editor.playheadSec >= (this.editor.loopInOut ? this.editor.outSec : this.editor.durationSec) - 0.001;
+    const boundary = this.editor.loopInOut ? this.editor.outSec : this.editor.durationSec;
+    const atEnd = this.editor.playheadSec >= boundary - 0.001;
     const startSec = atEnd ? this.editor.inSec : this.editor.playheadSec;
 
-    const source = context.createBufferSource();
-    source.buffer = buffer;
-    source.connect(context.destination);
-    source.onended = () => {
-      if (this.sourceNode === source) this.handleEnded();
-    };
-    source.start(0, startSec);
+    const plan = buildPlaybackPlan(
+      this.editor.timelineSpans,
+      startSec,
+      boundary,
+      this.editor.viewFilter,
+      this.editor.muteMarked,
+      this.editor.markedIntervals,
+    );
 
-    this.sourceNode = source;
-    this.startedAtContextTime = context.currentTime;
-    this.startedAtPlayheadSec = startSec;
+    if (plan.chunks.length === 0) {
+      // Nothing kept to play from here (e.g. "hide unmarked" with no marked regions).
+      this.editor.setPlayhead(startSec);
+      this.editor.isPlaying = false;
+      return;
+    }
+
+    const gainNode = context.createGain();
+    gainNode.connect(context.destination);
+    const contextStart = context.currentTime;
+    for (const event of plan.gainEvents) {
+      gainNode.gain.linearRampToValueAtTime(event.value, contextStart + event.time);
+    }
+
+    const sources = plan.chunks.map((chunk) => {
+      const source = context.createBufferSource();
+      source.buffer = buffer;
+      source.connect(gainNode);
+      source.start(contextStart + chunk.playAt, chunk.sourceStart, chunk.sourceEnd - chunk.sourceStart);
+      return source;
+    });
+    const lastSource = sources[sources.length - 1];
+    lastSource.onended = () => {
+      if (this.sourceNodes[this.sourceNodes.length - 1] === lastSource) this.handleEnded();
+    };
+
+    this.gainNode = gainNode;
+    this.sourceNodes = sources;
+    this.plan = plan;
+    this.planContextStart = contextStart;
     this.editor.setPlayhead(startSec);
     this.editor.isPlaying = true;
     this.scheduleTick();
   }
 
   pause(): void {
-    this.editor.setPlayhead(this.currentElapsedSec());
-    this.stopSource();
+    this.editor.setPlayhead(this.currentSourceSec());
+    this.stopSources();
     this.editor.isPlaying = false;
     this.cancelTick();
   }
@@ -66,28 +98,58 @@ export class AudioPlayer {
   /** Relocate playback (and the playhead) to `sec`; keeps playing if it was already playing. */
   seek(sec: number): void {
     const wasPlaying = this.editor.isPlaying;
-    this.stopSource();
+    this.stopSources();
     this.cancelTick();
     this.editor.isPlaying = false;
     this.editor.setPlayhead(sec);
     if (wasPlaying) this.play();
   }
 
-  private currentElapsedSec(): number {
-    if (!this.context || !this.sourceNode) return this.editor.playheadSec;
-    return this.startedAtPlayheadSec + (this.context.currentTime - this.startedAtContextTime);
+  /**
+   * Rebuild the schedule from the current playhead. Call after changing
+   * the view filter, mute, or marked regions while a take is playing —
+   * none of those invalidate the AudioBuffer, only what's already been
+   * scheduled from it, so a plain re-seek is enough to pick them up.
+   */
+  refreshIfPlaying(): void {
+    if (this.editor.isPlaying) this.seek(this.editor.playheadSec);
   }
 
-  private stopSource(): void {
-    if (!this.sourceNode) return;
-    this.sourceNode.onended = null;
-    try {
-      this.sourceNode.stop();
-    } catch {
-      // already stopped — harmless
+  /** Elapsed context time since the current plan started, converted back to a source-buffer position. */
+  private currentSourceSec(): number {
+    if (!this.context || !this.plan) return this.editor.playheadSec;
+    const elapsed = clamp(this.context.currentTime - this.planContextStart, 0, this.plan.totalSec);
+    return this.sourceSecAtElapsed(elapsed);
+  }
+
+  /** Maps a point on the plan's own (gapless) timeline back to where that is in the source buffer. */
+  private sourceSecAtElapsed(elapsedPlaySec: number): number {
+    const chunks = this.plan?.chunks ?? [];
+    if (chunks.length === 0) return this.editor.playheadSec;
+
+    for (const chunk of chunks) {
+      const length = chunk.sourceEnd - chunk.sourceStart;
+      if (elapsedPlaySec <= chunk.playAt + length || chunk === chunks[chunks.length - 1]) {
+        return chunk.sourceStart + Math.max(0, elapsedPlaySec - chunk.playAt);
+      }
     }
-    this.sourceNode.disconnect();
-    this.sourceNode = null;
+    return chunks[chunks.length - 1].sourceEnd;
+  }
+
+  private stopSources(): void {
+    for (const source of this.sourceNodes) {
+      source.onended = null;
+      try {
+        source.stop();
+      } catch {
+        // already stopped — harmless
+      }
+      source.disconnect();
+    }
+    this.sourceNodes = [];
+    this.gainNode?.disconnect();
+    this.gainNode = null;
+    this.plan = null;
   }
 
   private handleEnded(): void {
@@ -101,18 +163,16 @@ export class AudioPlayer {
   }
 
   private scheduleTick = (): void => {
-    if (!this.editor.isPlaying) return;
+    if (!this.editor.isPlaying || !this.context || !this.plan) return;
 
-    const elapsed = this.currentElapsedSec();
-    const boundary = this.editor.loopInOut ? this.editor.outSec : this.editor.durationSec;
-
-    if (elapsed >= boundary) {
-      this.stopSource();
+    const elapsed = this.context.currentTime - this.planContextStart;
+    if (elapsed >= this.plan.totalSec) {
+      this.stopSources();
       this.handleEnded();
       return;
     }
 
-    this.editor.setPlayhead(elapsed);
+    this.editor.setPlayhead(this.sourceSecAtElapsed(elapsed));
     this.rafHandle = requestAnimationFrame(this.scheduleTick);
   };
 
@@ -121,6 +181,10 @@ export class AudioPlayer {
     cancelAnimationFrame(this.rafHandle);
     this.rafHandle = null;
   }
+}
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(Math.max(value, min), max);
 }
 
 export const player = new AudioPlayer(editor);

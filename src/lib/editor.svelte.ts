@@ -7,10 +7,21 @@ import {
   type RawSilenceRegion,
   type SilenceRegion,
 } from "./audio/silence";
+import {
+  keptDuration,
+  keptToSource,
+  sourceToKept,
+  visibleSpans,
+  type DisplayedInterval,
+  type TimelineSpan,
+  type ViewFilter,
+} from "./audio/timelineMap";
 import { vadDetector } from "./vadDetector";
 
 /** How a pending timeline selection overlaps the currently marked regions. */
 export type SelectionOverlap = "unmarked" | "marked" | "mixed";
+
+export type { ViewFilter };
 
 export interface SilenceSettings {
   /** Silero VAD speech-probability threshold (0-1); higher = less sensitive. */
@@ -64,9 +75,17 @@ export class EditorState {
   isPlaying: boolean = $state(false);
   loopInOut: boolean = $state(false);
 
-  /** Visible window of the waveform, in seconds. */
+  /**
+   * Visible window of the waveform, in *kept* seconds (see `timelineSpans`)
+   * — equal to source seconds while `viewFilter` is "all".
+   */
   viewStartSec: number = $state(0);
   viewDurationSec: number = $state(0);
+
+  /** Which parts of the timeline the waveform/playback show: everything, or only marked/unmarked audio. */
+  viewFilter: ViewFilter = $state("all");
+  /** Duck marked audio with a 100ms fade so you can preview the cut without hiding anything. */
+  muteMarked: boolean = $state(false);
 
   settings: SilenceSettings = $state({ ...DEFAULT_SETTINGS });
   rawSilenceRegions: RawSilenceRegion[] = $state([]);
@@ -88,6 +107,19 @@ export class EditorState {
   readonly silenceRegions: SilenceRegion[] = $derived.by(() =>
     applySilenceBuffer(this.rawSilenceRegions, this.settings.bufferMs),
   );
+
+  /** Marked regions' displayed (post-buffer) bounds — what the view filter hides/shows and mute ducks. */
+  readonly markedIntervals: DisplayedInterval[] = $derived.by(() =>
+    this.silenceRegions.flatMap((region) => (region.displayed ? [region.displayed] : [])),
+  );
+
+  /** Timeline collapsed by `viewFilter`: alternating spans the waveform/player keep or skip. */
+  readonly timelineSpans: TimelineSpan[] = $derived.by(() =>
+    visibleSpans(this.durationSec, this.markedIntervals, this.viewFilter),
+  );
+
+  /** Length of the collapsed timeline — the "kept" seconds `viewStartSec`/`viewDurationSec` are measured in. */
+  readonly displayKeptDuration: number = $derived(keptDuration(this.timelineSpans));
 
   readonly hasSelection = $derived(this.selectionStartSec !== null && this.selectionEndSec !== null);
 
@@ -119,10 +151,42 @@ export class EditorState {
     this.detectionError = null;
     this.inSec = 0;
     this.outSec = buffer.duration;
+    this.viewFilter = "all";
+    this.muteMarked = false;
     this.viewStartSec = 0;
     this.viewDurationSec = buffer.duration;
     this.selectionStartSec = null;
     this.selectionEndSec = null;
+  }
+
+  /**
+   * Switching filters changes what "kept seconds" means, so the raw
+   * viewStartSec/viewDurationSec numbers don't carry over — but the
+   * *content* you were looking at should. Translate the current window
+   * to source time under the old filter, then back to kept time under
+   * the new one, so the zoom/pan you had stays put instead of resetting
+   * to the full timeline every time you toggle.
+   */
+  setViewFilter(filter: ViewFilter): void {
+    const oldSpans = this.timelineSpans;
+    const sourceStart = keptToSource(oldSpans, this.viewStartSec);
+    const sourceEnd = keptToSource(oldSpans, this.viewStartSec + this.viewDurationSec);
+
+    this.viewFilter = filter;
+
+    const newSpans = this.timelineSpans;
+    const newStart = sourceToKept(newSpans, sourceStart);
+    const newDuration = sourceToKept(newSpans, sourceEnd) - newStart;
+
+    // The viewed content collapsed entirely under the new filter (e.g. you
+    // were zoomed into a marked region and just hid marked audio) — fall
+    // back to showing everything the new filter leaves visible.
+    if (newDuration > 0) this.setView(newStart, newDuration);
+    else this.setView(0, this.displayKeptDuration);
+  }
+
+  setMuteMarked(muteMarked: boolean): void {
+    this.muteMarked = muteMarked;
   }
 
   async runSilenceDetection(): Promise<void> {
@@ -289,10 +353,12 @@ export class EditorState {
     this.playheadSec = clamp(sec, 0, this.durationSec);
   }
 
+  /** `startSec`/`durationSec` are kept seconds — see `displayKeptDuration`. */
   setView(startSec: number, durationSec: number): void {
-    const maxStart = Math.max(0, this.durationSec - durationSec);
+    const total = this.displayKeptDuration;
+    const maxStart = Math.max(0, total - durationSec);
     this.viewStartSec = clamp(startSec, 0, maxStart);
-    this.viewDurationSec = clamp(durationSec, 0, this.durationSec || durationSec);
+    this.viewDurationSec = clamp(durationSec, 0, total || durationSec);
   }
 }
 

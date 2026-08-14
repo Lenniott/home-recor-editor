@@ -1,7 +1,34 @@
 <script lang="ts">
-  import { editor } from "../editor.svelte";
+  import { editor, type ViewFilter } from "../editor.svelte";
+  import { player } from "../player";
 
   const markerCount = $derived(editor.silenceRegions.filter((r) => r.displayed).length);
+
+  const VIEW_FILTERS: { value: ViewFilter; label: string }[] = [
+    { value: "all", label: "All" },
+    { value: "hideMarked", label: "Hide marked" },
+    { value: "hideUnmarked", label: "Hide unmarked" },
+  ];
+
+  function applyViewFilter(filter: ViewFilter): void {
+    editor.setViewFilter(filter);
+    player.refreshIfPlaying();
+  }
+
+  function toggleMuteMarked(): void {
+    editor.setMuteMarked(!editor.muteMarked);
+    player.refreshIfPlaying();
+  }
+
+  function markSelection(): void {
+    editor.markSelection();
+    player.refreshIfPlaying();
+  }
+
+  function unmarkSelection(): void {
+    editor.unmarkSelection();
+    player.refreshIfPlaying();
+  }
 
   function onThreshold(e: Event): void {
     editor.setPositiveSpeechThreshold(Number((e.currentTarget as HTMLInputElement).value));
@@ -72,6 +99,36 @@
 
   <span class="count">{markerCount} region{markerCount === 1 ? "" : "s"}</span>
 
+  <div class="control view-filter">
+    <span class="label">View</span>
+    <div class="segmented" role="group" aria-label="Timeline view filter">
+      {#each VIEW_FILTERS as { value, label } (value)}
+        <button
+          type="button"
+          class="segment"
+          class:active={editor.viewFilter === value}
+          aria-pressed={editor.viewFilter === value}
+          onclick={() => applyViewFilter(value)}
+          disabled={!editor.hasAudio}
+        >
+          {label}
+        </button>
+      {/each}
+    </div>
+  </div>
+
+  <button
+    type="button"
+    class="mute-toggle"
+    class:active={editor.muteMarked}
+    aria-pressed={editor.muteMarked}
+    onclick={toggleMuteMarked}
+    disabled={!editor.hasAudio}
+    title="Preview the cut: duck marked audio with a 100ms fade"
+  >
+    {editor.muteMarked ? "Marked muted" : "Mute marked"}
+  </button>
+
   {#if editor.detectionError}
     <span class="detect-error">{editor.detectionError}</span>
   {/if}
@@ -84,10 +141,10 @@
         )}
       </span>
       {#if editor.selectionOverlap === "unmarked" || editor.selectionOverlap === "mixed"}
-        <button class="mark" onclick={() => editor.markSelection()} title="Shortcut: m">Mark <kbd>m</kbd></button>
+        <button class="mark" onclick={markSelection} title="Shortcut: m">Mark <kbd>m</kbd></button>
       {/if}
       {#if editor.selectionOverlap === "marked" || editor.selectionOverlap === "mixed"}
-        <button class="unmark" onclick={() => editor.unmarkSelection()} title="Shortcut: m">Unmark <kbd>m</kbd></button>
+        <button class="unmark" onclick={unmarkSelection} title="Shortcut: m">Unmark <kbd>m</kbd></button>
       {/if}
       <button class="clear" onclick={() => editor.clearSelection()} aria-label="Clear selection" title="Shortcut: Esc">✕</button>
     </div>
@@ -144,6 +201,50 @@
     font-size: 0.75rem;
     color: var(--in-color);
     white-space: nowrap;
+  }
+
+  .view-filter {
+    gap: 0.6rem;
+  }
+
+  .segmented {
+    display: flex;
+    border: 1px solid var(--panel-line);
+    border-radius: 5px;
+    overflow: hidden;
+  }
+
+  .segment {
+    font-size: 0.72rem;
+    padding: 0.4rem 0.65rem;
+    border: none;
+    border-right: 1px solid var(--panel-line);
+    border-radius: 0;
+    white-space: nowrap;
+  }
+
+  .segment:last-child {
+    border-right: none;
+  }
+
+  .segment.active {
+    color: var(--chassis);
+    background: var(--amber);
+  }
+
+  .segment.active:hover:not(:disabled) {
+    background: var(--amber);
+  }
+
+  .mute-toggle {
+    font-size: 0.75rem;
+    white-space: nowrap;
+  }
+
+  .mute-toggle.active {
+    color: var(--out-color);
+    border-color: var(--out-color);
+    background: rgba(63, 167, 154, 0.16);
   }
 
   .selection-actions {

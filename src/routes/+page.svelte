@@ -64,6 +64,7 @@
     } else if (e.key.toLowerCase() === "m" && !isFormField && editor.hasSelection) {
       e.preventDefault();
       editor.toggleSelectionMark();
+      player.refreshIfPlaying();
     }
   }
 </script>
