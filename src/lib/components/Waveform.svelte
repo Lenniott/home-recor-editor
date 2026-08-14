@@ -476,6 +476,10 @@
 
   function onPointerDown(e: PointerEvent): void {
     if (!editor.hasAudio) return;
+    // Opens the undo transaction for this whole gesture — matched by
+    // `editor.endEdit()` in `onPointerUp`, which fires whether it turns
+    // into a marker/IN/OUT drag, a drag-select, or just a click-seek.
+    editor.beginEdit();
     drag = hitTest(e.offsetX) ?? { type: "select", anchorSec: resolveClickSourceSec(e.offsetX), startX: e.offsetX, moved: false };
     canvas?.setPointerCapture(e.pointerId);
   }
@@ -494,7 +498,8 @@
   }
 
   function onPointerUp(): void {
-    if (drag?.type === "select") {
+    if (!drag) return;
+    if (drag.type === "select") {
       if (!drag.moved) {
         // Never moved past the click threshold: it's just a click. Seek
         // there and drop any previously pending selection instead of
@@ -507,13 +512,17 @@
         editor.finishSelectionDrag();
         player.refreshIfPlaying();
       }
-    } else if (drag?.type === "silence") {
+    } else if (drag.type === "silence") {
       // Merge check happens only here, once, rather than on every
       // pointermove — see finishMarkerDrag for why.
       editor.finishMarkerDrag(drag.index);
       player.refreshIfPlaying();
     }
     drag = null;
+    // Closes the transaction opened in `onPointerDown`. A handle tapped
+    // but never dragged (or a click-seek that lands back on the same
+    // playhead position) is dropped as a no-op inside `endEdit`.
+    editor.endEdit();
   }
 
   // Wheel events can fire faster than the display refreshes; batching them
@@ -524,6 +533,10 @@
   let wheelZoomFactor = 1;
   let wheelAnchorX = 0;
   let wheelPanDeltaSec = 0;
+
+  /** A zoom/pan flick is a burst of many wheel events, not one — the undo transaction stays open until the burst goes quiet for this long. */
+  const WHEEL_IDLE_MS = 300;
+  let wheelIdleTimeout: ReturnType<typeof setTimeout> | null = null;
 
   function flushWheel(): void {
     if (wheelIsZoom) {
@@ -549,6 +562,16 @@
   function onWheel(e: WheelEvent): void {
     if (!editor.hasAudio) return;
     e.preventDefault();
+
+    // First event of a burst opens the transaction; every later event in
+    // the same burst just pushes the idle deadline back, so a long flick
+    // still becomes one undo step instead of one per animation frame.
+    if (wheelIdleTimeout === null) editor.beginEdit();
+    else clearTimeout(wheelIdleTimeout);
+    wheelIdleTimeout = setTimeout(() => {
+      wheelIdleTimeout = null;
+      editor.endEdit();
+    }, WHEEL_IDLE_MS);
 
     const isZoom = e.ctrlKey || e.metaKey;
     if (isZoom !== wheelIsZoom && rafId !== null) {

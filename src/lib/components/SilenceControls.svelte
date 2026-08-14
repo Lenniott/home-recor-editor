@@ -42,6 +42,17 @@
     editor.setBufferMs(Number((e.currentTarget as HTMLInputElement).value));
   }
 
+  // The three settings sliders fire `oninput` on every drag tick, but a
+  // drag should still cost one undo step, not one per tick — same
+  // transaction-around-the-gesture pattern as Waveform's pointer drags.
+  function beginSliderEdit(): void {
+    editor.beginEdit();
+  }
+
+  function endSliderEdit(): void {
+    editor.endEdit();
+  }
+
   function formatTime(totalSeconds: number): string {
     const s = Math.max(0, totalSeconds);
     const minutes = Math.floor(s / 60);
@@ -60,6 +71,9 @@
       step="0.05"
       value={editor.settings.positiveSpeechThreshold}
       oninput={onThreshold}
+      onpointerdown={beginSliderEdit}
+      onpointerup={endSliderEdit}
+      onpointercancel={endSliderEdit}
       disabled={!editor.hasAudio}
     />
     <span class="value">{editor.settings.positiveSpeechThreshold.toFixed(2)}</span>
@@ -74,6 +88,9 @@
       step="50"
       value={editor.settings.minSilenceMs}
       oninput={onMinSilence}
+      onpointerdown={beginSliderEdit}
+      onpointerup={endSliderEdit}
+      onpointercancel={endSliderEdit}
       disabled={!editor.hasAudio}
     />
     <span class="value">{editor.settings.minSilenceMs} ms</span>
@@ -88,6 +105,9 @@
       step="10"
       value={editor.settings.bufferMs}
       oninput={onBuffer}
+      onpointerdown={beginSliderEdit}
+      onpointerup={endSliderEdit}
+      onpointercancel={endSliderEdit}
       disabled={!editor.hasAudio}
     />
     <span class="value">{editor.settings.bufferMs} ms</span>

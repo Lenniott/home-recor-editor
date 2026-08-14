@@ -22,20 +22,37 @@
   </div>
 
   <label class="loop">
-    <input type="checkbox" bind:checked={editor.loopInOut} disabled={!editor.hasAudio} />
+    <input
+      type="checkbox"
+      checked={editor.loopInOut}
+      onchange={(e) => editor.setLoopInOut((e.currentTarget as HTMLInputElement).checked)}
+      disabled={!editor.hasAudio}
+    />
     Loop IN&ndash;OUT
   </label>
 
   <div class="marker-readout in">
     <button onclick={() => player.seek(editor.inSec)} disabled={!editor.hasAudio}>IN</button>
     <span class="value">{formatTime(editor.inSec)}</span>
-    <button class="set" onclick={() => editor.setIn(editor.playheadSec)} disabled={!editor.hasAudio}>set</button>
+    <button
+      class="set"
+      onclick={() => editor.commitEdit(() => editor.setIn(editor.playheadSec))}
+      disabled={!editor.hasAudio}
+    >
+      set
+    </button>
   </div>
 
   <div class="marker-readout out">
     <button onclick={() => player.seek(editor.outSec)} disabled={!editor.hasAudio}>OUT</button>
     <span class="value">{formatTime(editor.outSec)}</span>
-    <button class="set" onclick={() => editor.setOut(editor.playheadSec)} disabled={!editor.hasAudio}>set</button>
+    <button
+      class="set"
+      onclick={() => editor.commitEdit(() => editor.setOut(editor.playheadSec))}
+      disabled={!editor.hasAudio}
+    >
+      set
+    </button>
   </div>
 </div>
 

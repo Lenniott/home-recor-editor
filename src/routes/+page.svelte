@@ -99,17 +99,30 @@
   function onKeydown(e: KeyboardEvent): void {
     const target = e.target as HTMLElement | null;
     const isFormField = !!target && ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName);
-    if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "s") {
+    const key = e.key.toLowerCase();
+    if ((e.metaKey || e.ctrlKey) && key === "s") {
       // Always take over Cmd/Ctrl+S, even in form fields, so the browser's
       // "save page" dialog never has a chance to appear.
       e.preventDefault();
       saveProject();
+    } else if ((e.metaKey || e.ctrlKey) && key === "z") {
+      // Same takeover as Cmd/Ctrl+S above, even while a slider has focus —
+      // otherwise the webview's own text-field undo could swallow the key.
+      e.preventDefault();
+      if (e.shiftKey) editor.redo();
+      else editor.undo();
+      player.refreshIfPlaying();
+    } else if ((e.metaKey || e.ctrlKey) && key === "y") {
+      // Windows/Linux redo convention, alongside Cmd/Ctrl+Shift+Z above.
+      e.preventDefault();
+      editor.redo();
+      player.refreshIfPlaying();
     } else if (e.code === "Space" && !isFormField) {
       e.preventDefault();
       player.toggle();
     } else if (e.code === "Escape" && editor.hasSelection) {
       editor.clearSelection();
-    } else if (e.key.toLowerCase() === "m" && !isFormField && editor.hasSelection) {
+    } else if (key === "m" && !isFormField && editor.hasSelection) {
       e.preventDefault();
       editor.toggleSelectionMark();
       player.refreshIfPlaying();

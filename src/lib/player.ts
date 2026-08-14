@@ -172,7 +172,11 @@ export class AudioPlayer {
       return;
     }
 
-    this.editor.setPlayhead(this.sourceSecAtElapsed(elapsed));
+    // Every animation frame during playback, not a user gesture — must
+    // never become (or interrupt) an undo step. Contrast with `seek`'s
+    // `setPlayhead` call, which backs an undoable click-seek from the
+    // waveform and stays outside this wrapper.
+    this.editor.withoutHistory(() => this.editor.setPlayhead(this.sourceSecAtElapsed(elapsed)));
     this.rafHandle = requestAnimationFrame(this.scheduleTick);
   };
 

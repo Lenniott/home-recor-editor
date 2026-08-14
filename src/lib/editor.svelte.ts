@@ -16,6 +16,7 @@ import {
   type TimelineSpan,
   type ViewFilter,
 } from "./audio/timelineMap";
+import { EditHistory } from "./editHistory";
 import { reconcileProjectWithDuration, type ProjectFile, type ProjectSnapshot } from "./projectFile";
 import { vadDetector } from "./vadDetector";
 
@@ -62,6 +63,60 @@ function overlapFraction(regions: RawMarker[], start: number, end: number): numb
 }
 
 /**
+ * Everything Cmd+Z / Cmd+Shift+Z walk through. Deliberately excludes the
+ * loaded `audioBuffer`/`monoSamples`/`fileName`/`filePath` (opening a
+ * recording is not undoable — see `EditorState.loadAudio`) and
+ * `isPlaying`/VAD progress/error (transient playback/detection status,
+ * not document state).
+ */
+interface SessionSnapshot {
+  rawMarkers: RawMarker[];
+  inSec: number;
+  outSec: number;
+  settings: SilenceSettings;
+  viewStartSec: number;
+  viewDurationSec: number;
+  viewFilter: ViewFilter;
+  muteMarked: boolean;
+  selectionStartSec: number | null;
+  selectionEndSec: number | null;
+  playheadSec: number;
+  loopInOut: boolean;
+}
+
+function cloneSnapshot(snapshot: SessionSnapshot): SessionSnapshot {
+  return {
+    ...snapshot,
+    rawMarkers: snapshot.rawMarkers.map((r) => ({ ...r })),
+    settings: { ...snapshot.settings },
+  };
+}
+
+function regionsEqual(a: RawMarker[], b: RawMarker[]): boolean {
+  return a.length === b.length && a.every((r, i) => r.start === b[i].start && r.end === b[i].end);
+}
+
+/** Backs `EditHistory.discardIfUnchanged` — a gesture that never actually moved anything shouldn't cost an undo step. */
+function snapshotsEqual(a: SessionSnapshot, b: SessionSnapshot): boolean {
+  return (
+    a.inSec === b.inSec &&
+    a.outSec === b.outSec &&
+    a.viewStartSec === b.viewStartSec &&
+    a.viewDurationSec === b.viewDurationSec &&
+    a.viewFilter === b.viewFilter &&
+    a.muteMarked === b.muteMarked &&
+    a.selectionStartSec === b.selectionStartSec &&
+    a.selectionEndSec === b.selectionEndSec &&
+    a.playheadSec === b.playheadSec &&
+    a.loopInOut === b.loopInOut &&
+    a.settings.positiveSpeechThreshold === b.settings.positiveSpeechThreshold &&
+    a.settings.minSilenceMs === b.settings.minSilenceMs &&
+    a.settings.bufferMs === b.settings.bufferMs &&
+    regionsEqual(a.rawMarkers, b.rawMarkers)
+  );
+}
+
+/**
  * Single source of truth for the loaded take and everything derived from
  * it: playback position, view window, silence regions, and the IN/OUT
  * markers. UI components read/write through this — none of them own
@@ -103,6 +158,18 @@ export class EditorState {
   selectionStartSec: number | null = $state(null);
   selectionEndSec: number | null = $state(null);
 
+  /** Undo/redo over `SessionSnapshot` — see `beginEdit`/`endEdit`/`commitEdit`/`withoutHistory` below. */
+  private readonly history = new EditHistory<SessionSnapshot>(cloneSnapshot);
+  /**
+   * >0 while a gesture-scoped transaction is open. Only the outermost
+   * `beginEdit`/`endEdit` pair touches `history` — a nested `commitEdit`
+   * call (e.g. `finishSelectionDrag` calling `markSelection` mid-drag)
+   * joins the caller's already-open step instead of adding its own.
+   */
+  private transactionDepth = 0;
+  /** Set by `withoutHistory` so checkpoints are skipped even if code inside it calls `commitEdit` (e.g. a future change to `setPlayhead`). */
+  private historySuspended = false;
+
   readonly durationSec = $derived(this.audioBuffer?.duration ?? 0);
   readonly sampleRate = $derived(this.audioBuffer?.sampleRate ?? 0);
   readonly hasAudio = $derived(this.audioBuffer !== null);
@@ -143,6 +210,101 @@ export class EditorState {
     return "mixed";
   });
 
+  private snapshot(): SessionSnapshot {
+    return {
+      rawMarkers: this.rawMarkers.map((r) => ({ ...r })),
+      inSec: this.inSec,
+      outSec: this.outSec,
+      settings: { ...this.settings },
+      viewStartSec: this.viewStartSec,
+      viewDurationSec: this.viewDurationSec,
+      viewFilter: this.viewFilter,
+      muteMarked: this.muteMarked,
+      selectionStartSec: this.selectionStartSec,
+      selectionEndSec: this.selectionEndSec,
+      playheadSec: this.playheadSec,
+      loopInOut: this.loopInOut,
+    };
+  }
+
+  private applySnapshot(snapshot: SessionSnapshot): void {
+    this.rawMarkers = snapshot.rawMarkers;
+    this.inSec = snapshot.inSec;
+    this.outSec = snapshot.outSec;
+    this.settings = snapshot.settings;
+    this.viewStartSec = snapshot.viewStartSec;
+    this.viewDurationSec = snapshot.viewDurationSec;
+    this.viewFilter = snapshot.viewFilter;
+    this.muteMarked = snapshot.muteMarked;
+    this.selectionStartSec = snapshot.selectionStartSec;
+    this.selectionEndSec = snapshot.selectionEndSec;
+    this.playheadSec = snapshot.playheadSec;
+    this.loopInOut = snapshot.loopInOut;
+  }
+
+  /**
+   * Open a gesture-scoped undo transaction: checkpoints the pre-gesture
+   * state once, on the outermost call. Pair with `endEdit` around a
+   * multi-event gesture (a pointer drag, a wheel-zoom flick) so the whole
+   * gesture becomes one undo step instead of one per intermediate event —
+   * see `moveMarker`/`setView`/`setSelection`/`setIn`/`setOut`/
+   * `setPlayhead`, which never checkpoint on their own.
+   */
+  beginEdit(): void {
+    if (this.transactionDepth === 0 && !this.historySuspended) {
+      this.history.checkpoint(this.snapshot());
+    }
+    this.transactionDepth++;
+  }
+
+  /**
+   * Close a transaction opened by `beginEdit`. On the outermost call,
+   * drops the checkpoint again if nothing actually changed (a click that
+   * never turned into a drag) so no-op gestures don't cost an undo step.
+   */
+  endEdit(): void {
+    if (this.transactionDepth === 0) return;
+    this.transactionDepth--;
+    if (this.transactionDepth === 0 && !this.historySuspended) {
+      this.history.discardIfUnchanged(this.snapshot(), snapshotsEqual);
+    }
+  }
+
+  /** `beginEdit` / `fn` / `endEdit` for a discrete (non-drag) action — one call, one undo step. */
+  commitEdit(fn: () => void): void {
+    this.beginEdit();
+    fn();
+    this.endEdit();
+  }
+
+  /**
+   * Run `fn` without recording any undo step, even if something inside
+   * it calls `commitEdit` — for state changes that must never be undone:
+   * the playhead ticking during playback, and restoring a just-opened
+   * file (`loadAudio`/`applyProject` clear the stack afterwards anyway).
+   */
+  withoutHistory(fn: () => void): void {
+    const wasSuspended = this.historySuspended;
+    this.historySuspended = true;
+    try {
+      fn();
+    } finally {
+      this.historySuspended = wasSuspended;
+    }
+  }
+
+  /** Step back one undo entry, if any. No-op on an empty stack. */
+  undo(): void {
+    const previous = this.history.undo(this.snapshot());
+    if (previous) this.applySnapshot(previous);
+  }
+
+  /** Step forward one redo entry, if any. No-op on an empty stack or after a fresh edit clears it. */
+  redo(): void {
+    const next = this.history.redo(this.snapshot());
+    if (next) this.applySnapshot(next);
+  }
+
   loadAudio(buffer: AudioBuffer, fileName: string, monoSamples: Float32Array, filePath: string | null = null): void {
     this.audioBuffer = buffer;
     this.fileName = fileName;
@@ -161,6 +323,9 @@ export class EditorState {
     this.viewDurationSec = buffer.duration;
     this.selectionStartSec = null;
     this.selectionEndSec = null;
+    // A freshly opened recording is a new document — Cmd+Z should never
+    // reach back past it into whatever the previous take had.
+    this.history.clear();
   }
 
   /** Snapshot of everything a sidecar save persists — see `projectFile.ts`. */
@@ -195,6 +360,8 @@ export class EditorState {
     this.outSec = reconciled.outSec;
     this.settings = { ...reconciled.settings };
     this.setView(reconciled.viewStartSec, reconciled.viewDurationSec);
+    // Same reasoning as loadAudio: restoring a sidecar is loading a document, not editing one.
+    this.history.clear();
   }
 
   /**
@@ -206,25 +373,36 @@ export class EditorState {
    * to the full timeline every time you toggle.
    */
   setViewFilter(filter: ViewFilter): void {
-    const oldSpans = this.timelineSpans;
-    const sourceStart = keptToSource(oldSpans, this.viewStartSec);
-    const sourceEnd = keptToSource(oldSpans, this.viewStartSec + this.viewDurationSec);
+    this.commitEdit(() => {
+      const oldSpans = this.timelineSpans;
+      const sourceStart = keptToSource(oldSpans, this.viewStartSec);
+      const sourceEnd = keptToSource(oldSpans, this.viewStartSec + this.viewDurationSec);
 
-    this.viewFilter = filter;
+      this.viewFilter = filter;
 
-    const newSpans = this.timelineSpans;
-    const newStart = sourceToKept(newSpans, sourceStart);
-    const newDuration = sourceToKept(newSpans, sourceEnd) - newStart;
+      const newSpans = this.timelineSpans;
+      const newStart = sourceToKept(newSpans, sourceStart);
+      const newDuration = sourceToKept(newSpans, sourceEnd) - newStart;
 
-    // The viewed content collapsed entirely under the new filter (e.g. you
-    // were zoomed into a marked region and just hid marked audio) — fall
-    // back to showing everything the new filter leaves visible.
-    if (newDuration > 0) this.setView(newStart, newDuration);
-    else this.setView(0, this.displayKeptDuration);
+      // The viewed content collapsed entirely under the new filter (e.g. you
+      // were zoomed into a marked region and just hid marked audio) — fall
+      // back to showing everything the new filter leaves visible.
+      if (newDuration > 0) this.setView(newStart, newDuration);
+      else this.setView(0, this.displayKeptDuration);
+    });
   }
 
   setMuteMarked(muteMarked: boolean): void {
-    this.muteMarked = muteMarked;
+    this.commitEdit(() => {
+      this.muteMarked = muteMarked;
+    });
+  }
+
+  /** Toggle the transport loop-between-IN/OUT flag as one undo step (see `Transport.svelte`). */
+  setLoopInOut(loopInOut: boolean): void {
+    this.commitEdit(() => {
+      this.loopInOut = loopInOut;
+    });
   }
 
   async runSilenceDetection(): Promise<void> {
@@ -232,6 +410,10 @@ export class EditorState {
     this.isDetectingSilence = true;
     this.detectionProgress = 0;
     this.detectionError = null;
+    // Opened before the await so the checkpoint captures the regions this
+    // detection run is about to replace. Closed in `finally`, which
+    // discards it as a no-op if detection failed and `rawMarkers` never changed.
+    this.beginEdit();
     try {
       const segments = await vadDetector.detect(
         this.monoSamples,
@@ -256,6 +438,7 @@ export class EditorState {
       this.detectionError = err instanceof Error ? err.message : String(err);
     } finally {
       this.isDetectingSilence = false;
+      this.endEdit();
     }
   }
 
@@ -340,11 +523,13 @@ export class EditorState {
    * short.
    */
   markSelection(): void {
-    if (this.selectionStartSec === null || this.selectionEndSec === null) return;
-    const start = Math.min(this.selectionStartSec, this.selectionEndSec);
-    const end = Math.max(this.selectionStartSec, this.selectionEndSec);
-    this.rawMarkers = unionInterval(this.rawMarkers, start, end);
-    this.clearSelection();
+    this.commitEdit(() => {
+      if (this.selectionStartSec === null || this.selectionEndSec === null) return;
+      const start = Math.min(this.selectionStartSec, this.selectionEndSec);
+      const end = Math.max(this.selectionStartSec, this.selectionEndSec);
+      this.rawMarkers = unionInterval(this.rawMarkers, start, end);
+      this.clearSelection();
+    });
   }
 
   /**
@@ -352,11 +537,13 @@ export class EditorState {
    * regions it overlaps (see `subtractInterval`).
    */
   unmarkSelection(): void {
-    if (this.selectionStartSec === null || this.selectionEndSec === null) return;
-    const start = Math.min(this.selectionStartSec, this.selectionEndSec);
-    const end = Math.max(this.selectionStartSec, this.selectionEndSec);
-    this.rawMarkers = subtractInterval(this.rawMarkers, start, end);
-    this.clearSelection();
+    this.commitEdit(() => {
+      if (this.selectionStartSec === null || this.selectionEndSec === null) return;
+      const start = Math.min(this.selectionStartSec, this.selectionEndSec);
+      const end = Math.max(this.selectionStartSec, this.selectionEndSec);
+      this.rawMarkers = subtractInterval(this.rawMarkers, start, end);
+      this.clearSelection();
+    });
   }
 
   /** The "m" shortcut: unmark a fully-marked selection, mark anything else. */
