@@ -4,6 +4,7 @@
   import { decodeAudioFile, mixToMono } from "$lib/audio/decode";
   import { editor } from "$lib/editor.svelte";
   import { player } from "$lib/player";
+  import { parseProjectFile, serializeProject, sidecarPath } from "$lib/projectFile";
   import { vadDetector } from "$lib/vadDetector";
   import Waveform from "$lib/components/Waveform.svelte";
   import SilenceControls from "$lib/components/SilenceControls.svelte";
@@ -15,6 +16,9 @@
 
   let isLoading = $state(false);
   let loadError: string | null = $state(null);
+  let isSaving = $state(false);
+  let saveStatus: string | null = $state(null);
+  let saveStatusTimeout: ReturnType<typeof setTimeout> | undefined;
 
   async function openRecording(): Promise<void> {
     loadError = null;
@@ -32,6 +36,7 @@
     if (!selected || Array.isArray(selected)) return;
 
     isLoading = true;
+    saveStatus = null;
     try {
       // The command returns a raw ipc::Response, which invoke() surfaces as an
       // ArrayBuffer. Falls back to a plain number array on platforms where that
@@ -41,12 +46,50 @@
       const buffer = await decodeAudioFile(bytes, player.getContext());
       const mono = mixToMono(buffer);
       const fileName = selected.split(/[\\/]/).pop() ?? selected;
-      editor.loadAudio(buffer, fileName, mono);
+      editor.loadAudio(buffer, fileName, mono, selected);
+      await loadProjectIfPresent(selected);
     } catch (err) {
       loadError = describeError(err);
     } finally {
       isLoading = false;
     }
+  }
+
+  /**
+   * Restore a previously saved sidecar for this recording, if one exists.
+   * A missing or unreadable sidecar is the normal first-open case, so it
+   * silently leaves the freshly-loaded (empty) marks in place rather than
+   * surfacing an error.
+   */
+  async function loadProjectIfPresent(audioPath: string): Promise<void> {
+    try {
+      const text = await invoke<string | null>("read_text_file", { path: sidecarPath(audioPath) });
+      if (!text) return;
+      const project = parseProjectFile(text);
+      if (project) editor.applyProject(project);
+    } catch {
+      // Sidecar read failed (permissions, corrupt file, etc.) — keep going with empty marks.
+    }
+  }
+
+  async function saveProject(): Promise<void> {
+    if (!editor.filePath || isSaving) return;
+    isSaving = true;
+    try {
+      const contents = serializeProject(editor.toProject());
+      await invoke("write_text_file", { path: sidecarPath(editor.filePath), contents });
+      showSaveStatus("Saved");
+    } catch (err) {
+      showSaveStatus(`Save failed: ${describeError(err)}`);
+    } finally {
+      isSaving = false;
+    }
+  }
+
+  function showSaveStatus(message: string): void {
+    saveStatus = message;
+    clearTimeout(saveStatusTimeout);
+    saveStatusTimeout = setTimeout(() => (saveStatus = null), 3000);
   }
 
   function describeError(err: unknown): string {
@@ -56,7 +99,12 @@
   function onKeydown(e: KeyboardEvent): void {
     const target = e.target as HTMLElement | null;
     const isFormField = !!target && ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName);
-    if (e.code === "Space" && !isFormField) {
+    if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "s") {
+      // Always take over Cmd/Ctrl+S, even in form fields, so the browser's
+      // "save page" dialog never has a chance to appear.
+      e.preventDefault();
+      saveProject();
+    } else if (e.code === "Space" && !isFormField) {
       e.preventDefault();
       player.toggle();
     } else if (e.code === "Escape" && editor.hasSelection) {
@@ -77,7 +125,13 @@
       <button class="open" onclick={openRecording} disabled={isLoading}>
         {isLoading ? "Opening…" : "Open Recording"}
       </button>
+      <button class="save" onclick={saveProject} disabled={!editor.filePath || isSaving}>
+        {isSaving ? "Saving…" : "Save"}
+      </button>
       <span class="filename">{editor.fileName ?? "No recording loaded"}</span>
+      {#if saveStatus}
+        <span class="save-status">{saveStatus}</span>
+      {/if}
     </div>
     <SilenceControls />
   </header>
@@ -128,6 +182,11 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+
+  .save-status {
+    font-size: 0.8rem;
+    color: var(--out-color);
   }
 
   .stage {

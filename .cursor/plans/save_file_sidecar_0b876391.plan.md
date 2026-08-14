@@ -4,16 +4,16 @@ overview: Add Cmd+S (and a Save button) that writes a sidecar JSON next to the o
 todos:
   - id: project-module
     content: "Add projectFile.ts + tests: sidecar path, serialize, parse/validate"
-    status: pending
+    status: completed
   - id: tauri-io
     content: Add read_text_file / write_text_file Tauri commands
-    status: pending
+    status: completed
   - id: editor-session
     content: Store filePath; add toProject / applyProject on EditorState
-    status: pending
+    status: completed
   - id: ui-save-load
     content: Auto-load sidecar on open; Cmd+S + Save button in +page.svelte
-    status: pending
+    status: completed
 isProject: false
 ---
 

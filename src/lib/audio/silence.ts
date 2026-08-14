@@ -11,21 +11,21 @@ export interface SpeechSegment {
   end: number;
 }
 
-export interface RawSilenceRegion {
-  /** Acoustic silence boundaries, in seconds, before any buffer is applied. */
+export interface RawMarker {
+  /** Marked boundaries, in seconds, before any buffer is applied. */
   start: number;
   end: number;
 }
 
-export interface DisplayedMarkers {
+export interface MarkerBounds {
   start: number;
   end: number;
 }
 
-export interface SilenceRegion {
-  raw: RawSilenceRegion;
-  /** Marker positions after padding inward by the buffer. Null once the buffer collapses the region. */
-  displayed: DisplayedMarkers | null;
+export interface Marker {
+  raw: RawMarker;
+  /** Marker positions after padding inward by the buffer. Null once the buffer collapses the marker. */
+  displayed: MarkerBounds | null;
 }
 
 /**
@@ -38,13 +38,13 @@ export function silenceRegionsFromSpeechSegments(
   speechSegments: SpeechSegment[],
   durationSec: number,
   minSilenceMs: number,
-): RawSilenceRegion[] {
+): RawMarker[] {
   if (durationSec <= 0) return [];
 
   const minSilenceSec = minSilenceMs / 1000;
   const sorted = [...speechSegments].sort((a, b) => a.start - b.start);
 
-  const regions: RawSilenceRegion[] = [];
+  const regions: RawMarker[] = [];
   let cursor = 0;
   for (const segment of sorted) {
     const start = cursor;
@@ -61,12 +61,12 @@ export function silenceRegionsFromSpeechSegments(
 }
 
 /**
- * Pad each raw region inward by `bufferMs` on both sides. Regions the
+ * Pad each raw marker inward by `bufferMs` on both sides. Markers the
  * buffer collapses entirely (start would land at or after end) get
  * `displayed: null` — callers should skip those rather than render a
  * degenerate marker pair.
  */
-export function applySilenceBuffer(regions: RawSilenceRegion[], bufferMs: number): SilenceRegion[] {
+export function applySilenceBuffer(regions: RawMarker[], bufferMs: number): Marker[] {
   const bufferSec = bufferMs / 1000;
   return regions.map((raw) => {
     const start = raw.start + bufferSec;
@@ -76,16 +76,16 @@ export function applySilenceBuffer(regions: RawSilenceRegion[], bufferMs: number
 }
 
 /**
- * Recompute a raw region's boundary from a dragged displayed marker,
- * inverting the buffer pad so the region keeps working with the buffer
+ * Recompute a raw marker's boundary from a dragged displayed marker,
+ * inverting the buffer pad so the marker keeps working with the buffer
  * slider afterwards.
  */
-export function moveSilenceMarker(
-  raw: RawSilenceRegion,
+export function moveMarker(
+  raw: RawMarker,
   bufferMs: number,
   edge: "start" | "end",
   newDisplayedSeconds: number,
-): RawSilenceRegion {
+): RawMarker {
   const bufferSec = bufferMs / 1000;
   if (edge === "start") {
     const start = Math.max(0, newDisplayedSeconds - bufferSec);
@@ -102,13 +102,13 @@ export function moveSilenceMarker(
  * a previous manual mark) instead of stacking duplicate bands.
  */
 export function unionInterval(
-  regions: RawSilenceRegion[],
+  regions: RawMarker[],
   start: number,
   end: number,
-): RawSilenceRegion[] {
+): RawMarker[] {
   if (end <= start) return [...regions];
 
-  const merged: RawSilenceRegion[] = [];
+  const merged: RawMarker[] = [];
   let pendingStart = start;
   let pendingEnd = end;
 
@@ -136,13 +136,13 @@ export function unionInterval(
  * region; a range that fully covers a region drops it.
  */
 export function subtractInterval(
-  regions: RawSilenceRegion[],
+  regions: RawMarker[],
   start: number,
   end: number,
-): RawSilenceRegion[] {
+): RawMarker[] {
   if (end <= start) return [...regions];
 
-  const result: RawSilenceRegion[] = [];
+  const result: RawMarker[] = [];
   for (const region of regions) {
     if (end <= region.start || start >= region.end) {
       result.push(region);

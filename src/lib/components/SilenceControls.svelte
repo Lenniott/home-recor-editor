@@ -2,7 +2,7 @@
   import { editor, type ViewFilter } from "../editor.svelte";
   import { player } from "../player";
 
-  const markerCount = $derived(editor.silenceRegions.filter((r) => r.displayed).length);
+  const markerCount = $derived(editor.markers.filter((r) => r.displayed).length);
 
   const VIEW_FILTERS: { value: ViewFilter; label: string }[] = [
     { value: "all", label: "All" },

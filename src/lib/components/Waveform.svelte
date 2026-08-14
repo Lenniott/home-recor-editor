@@ -116,7 +116,7 @@
   }
 
   function findHiddenSpanForRegion(index: number): TimelineSpan | undefined {
-    const displayed = editor.silenceRegions[index]?.displayed;
+    const displayed = editor.markers[index]?.displayed;
     if (!displayed) return undefined;
     return editor.timelineSpans.find(
       (span) =>
@@ -159,8 +159,8 @@
   function hitTest(x: number): DragTarget | null {
     if (Math.abs(x - sourceTimeToX(editor.inSec, "end")) <= HIT_RADIUS) return { type: "in" };
     if (Math.abs(x - sourceTimeToX(editor.outSec, "start")) <= HIT_RADIUS) return { type: "out" };
-    for (let i = 0; i < editor.silenceRegions.length; i++) {
-      const displayed = editor.silenceRegions[i].displayed;
+    for (let i = 0; i < editor.markers.length; i++) {
+      const displayed = editor.markers[i].displayed;
       if (!displayed) continue;
       if (Math.abs(x - sourceTimeToX(displayed.start, "start")) <= HIT_RADIUS) return { type: "silence", index: i, edge: "start" };
       if (Math.abs(x - sourceTimeToX(displayed.end, "end")) <= HIT_RADIUS) return { type: "silence", index: i, edge: "end" };
@@ -300,10 +300,10 @@
    * only the two edge ticks still draw, now spread across the gutter
    * instead of stacked on the same pixel.
    */
-  function drawSilenceRegions(ctx: CanvasRenderingContext2D): void {
+  function drawMarkers(ctx: CanvasRenderingContext2D): void {
     const collapsed = editor.viewFilter === "hideMarked";
 
-    for (const region of editor.silenceRegions) {
+    for (const region of editor.markers) {
       if (!region.displayed) continue;
 
       if (!collapsed) {
@@ -434,7 +434,7 @@
     drawGrid(ctx);
     drawWaveform(ctx);
     drawGutters(ctx);
-    drawSilenceRegions(ctx);
+    drawMarkers(ctx);
     drawOutsideShade(ctx);
     drawPendingSelection(ctx);
     drawFlag(ctx, sourceTimeToX(editor.inSec, "end"), theme.in, "right");
@@ -467,7 +467,7 @@
     editor.playheadSec;
     editor.inSec;
     editor.outSec;
-    editor.silenceRegions;
+    editor.markers;
     editor.selectionStartSec;
     editor.selectionEndSec;
 
@@ -485,7 +485,7 @@
     if (drag.type === "in") editor.setIn(xToSourceTime(e.offsetX));
     else if (drag.type === "out") editor.setOut(xToSourceTime(e.offsetX));
     else if (drag.type === "silence") {
-      editor.moveSilenceMarker(drag.index, drag.edge, resolveSilenceDragSourceSec(drag.index, e.offsetX));
+      editor.moveMarker(drag.index, drag.edge, resolveSilenceDragSourceSec(drag.index, e.offsetX));
     } else {
       const t = xToSourceTime(e.offsetX);
       if (!drag.moved && Math.abs(e.offsetX - drag.startX) > CLICK_THRESHOLD_PX) drag.moved = true;
@@ -509,8 +509,8 @@
       }
     } else if (drag?.type === "silence") {
       // Merge check happens only here, once, rather than on every
-      // pointermove — see finishSilenceMarkerDrag for why.
-      editor.finishSilenceMarkerDrag(drag.index);
+      // pointermove — see finishMarkerDrag for why.
+      editor.finishMarkerDrag(drag.index);
       player.refreshIfPlaying();
     }
     drag = null;

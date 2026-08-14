@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   applySilenceBuffer,
-  moveSilenceMarker,
+  moveMarker,
   silenceRegionsFromSpeechSegments,
   subtractInterval,
   unionInterval,
@@ -169,10 +169,10 @@ describe("subtractInterval", () => {
   });
 });
 
-describe("moveSilenceMarker", () => {
+describe("moveMarker", () => {
   it("moving the start marker updates raw.start by inverting the buffer", () => {
     const raw = { start: 1, end: 2 };
-    const moved = moveSilenceMarker(raw, 100, "start", 1.3);
+    const moved = moveMarker(raw, 100, "start", 1.3);
 
     expect(moved.start).toBeCloseTo(1.2);
     expect(moved.end).toBe(2);
@@ -180,7 +180,7 @@ describe("moveSilenceMarker", () => {
 
   it("moving the end marker updates raw.end by inverting the buffer", () => {
     const raw = { start: 1, end: 2 };
-    const moved = moveSilenceMarker(raw, 100, "end", 1.7);
+    const moved = moveMarker(raw, 100, "end", 1.7);
 
     expect(moved.end).toBeCloseTo(1.8);
     expect(moved.start).toBe(1);
@@ -189,7 +189,7 @@ describe("moveSilenceMarker", () => {
   it("clamps so start never passes end and end never passes start", () => {
     const raw = { start: 1, end: 2 };
 
-    expect(moveSilenceMarker(raw, 100, "start", 5).start).toBeLessThanOrEqual(2);
-    expect(moveSilenceMarker(raw, 100, "end", -5).end).toBeGreaterThanOrEqual(1);
+    expect(moveMarker(raw, 100, "start", 5).start).toBeLessThanOrEqual(2);
+    expect(moveMarker(raw, 100, "end", -5).end).toBeGreaterThanOrEqual(1);
   });
 });

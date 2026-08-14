@@ -1,11 +1,11 @@
 import {
   applySilenceBuffer,
-  moveSilenceMarker,
+  moveMarker,
   silenceRegionsFromSpeechSegments,
   subtractInterval,
   unionInterval,
-  type RawSilenceRegion,
-  type SilenceRegion,
+  type Marker,
+  type RawMarker,
 } from "./audio/silence";
 import {
   keptDuration,
@@ -16,6 +16,7 @@ import {
   type TimelineSpan,
   type ViewFilter,
 } from "./audio/timelineMap";
+import { reconcileProjectWithDuration, type ProjectFile, type ProjectSnapshot } from "./projectFile";
 import { vadDetector } from "./vadDetector";
 
 /** How a pending timeline selection overlaps the currently marked regions. */
@@ -43,13 +44,13 @@ const NEGATIVE_THRESHOLD_MARGIN = 0.15;
  * Shared merge trigger for both ways two marked regions can end up
  * overlapping: a finished drag-select whose range overlaps existing marked
  * regions (see `finishSelectionDrag`), or dragging one marked region's
- * edge into a neighbor (see `moveSilenceMarker`). Once the overlap reaches
+ * edge into a neighbor (see `moveMarker`). Once the overlap reaches
  * this fraction of whichever region involved is shorter, it's clearly
  * intentional, so the two merge into one instead of just piling up.
  */
 const AUTO_MERGE_OVERLAP_FRACTION = 0.4;
 
-function overlapFraction(regions: RawSilenceRegion[], start: number, end: number): number {
+function overlapFraction(regions: RawMarker[], start: number, end: number): number {
   if (end <= start) return 0;
   let coveredSec = 0;
   for (const region of regions) {
@@ -68,6 +69,8 @@ function overlapFraction(regions: RawSilenceRegion[], start: number, end: number
  */
 export class EditorState {
   fileName: string | null = $state(null);
+  /** Full path of the opened recording — the save destination for its sidecar (see `projectFile.ts`). Null when opened outside Tauri (e.g. tests). */
+  filePath: string | null = $state(null);
   audioBuffer: AudioBuffer | null = $state(null);
   monoSamples: Float32Array = $state(new Float32Array(0));
 
@@ -88,7 +91,7 @@ export class EditorState {
   muteMarked: boolean = $state(false);
 
   settings: SilenceSettings = $state({ ...DEFAULT_SETTINGS });
-  rawSilenceRegions: RawSilenceRegion[] = $state([]);
+  rawMarkers: RawMarker[] = $state([]);
   isDetectingSilence: boolean = $state(false);
   detectionProgress: number = $state(0);
   detectionError: string | null = $state(null);
@@ -104,13 +107,13 @@ export class EditorState {
   readonly sampleRate = $derived(this.audioBuffer?.sampleRate ?? 0);
   readonly hasAudio = $derived(this.audioBuffer !== null);
 
-  readonly silenceRegions: SilenceRegion[] = $derived.by(() =>
-    applySilenceBuffer(this.rawSilenceRegions, this.settings.bufferMs),
+  readonly markers: Marker[] = $derived.by(() =>
+    applySilenceBuffer(this.rawMarkers, this.settings.bufferMs),
   );
 
-  /** Marked regions' displayed (post-buffer) bounds — what the view filter hides/shows and mute ducks. */
+  /** Markers' displayed (post-buffer) bounds — what the view filter hides/shows and mute ducks. */
   readonly markedIntervals: DisplayedInterval[] = $derived.by(() =>
-    this.silenceRegions.flatMap((region) => (region.displayed ? [region.displayed] : [])),
+    this.markers.flatMap((marker) => (marker.displayed ? [marker.displayed] : [])),
   );
 
   /** Timeline collapsed by `viewFilter`: alternating spans the waveform/player keep or skip. */
@@ -134,19 +137,20 @@ export class EditorState {
     const end = Math.max(this.selectionStartSec, this.selectionEndSec);
     if (end <= start) return null;
 
-    const fraction = overlapFraction(this.rawSilenceRegions, start, end);
+    const fraction = overlapFraction(this.rawMarkers, start, end);
     if (fraction <= 0) return "unmarked";
     if (fraction >= 1) return "marked";
     return "mixed";
   });
 
-  loadAudio(buffer: AudioBuffer, fileName: string, monoSamples: Float32Array): void {
+  loadAudio(buffer: AudioBuffer, fileName: string, monoSamples: Float32Array, filePath: string | null = null): void {
     this.audioBuffer = buffer;
     this.fileName = fileName;
+    this.filePath = filePath;
     this.monoSamples = monoSamples;
     this.playheadSec = 0;
     this.isPlaying = false;
-    this.rawSilenceRegions = [];
+    this.rawMarkers = [];
     this.detectionProgress = 0;
     this.detectionError = null;
     this.inSec = 0;
@@ -157,6 +161,40 @@ export class EditorState {
     this.viewDurationSec = buffer.duration;
     this.selectionStartSec = null;
     this.selectionEndSec = null;
+  }
+
+  /** Snapshot of everything a sidecar save persists — see `projectFile.ts`. */
+  toProject(): ProjectSnapshot {
+    return {
+      audioFileName: this.fileName ?? "",
+      durationSec: this.durationSec,
+      rawMarkers: this.rawMarkers.map((r) => ({ start: r.start, end: r.end })),
+      inSec: this.inSec,
+      outSec: this.outSec,
+      settings: { ...this.settings },
+      viewStartSec: this.viewStartSec,
+      viewDurationSec: this.viewDurationSec,
+    };
+  }
+
+  /**
+   * Restore marks, IN/OUT, settings, and the zoom/pan window from a
+   * loaded sidecar. Call after `loadAudio` — reconciles against the
+   * just-decoded duration first (see `reconcileProjectWithDuration`) so
+   * a sidecar saved against a since-modified file doesn't produce
+   * out-of-range marks. `setView` (rather than a direct assignment)
+   * clamps the restored window to what the just-loaded audio actually
+   * supports, since `viewFilter` is still "all" at this point (reset by
+   * `loadAudio`) the "kept" and source timelines are identical, so the
+   * saved seconds carry over directly.
+   */
+  applyProject(project: ProjectFile): void {
+    const reconciled = reconcileProjectWithDuration(project, this.durationSec);
+    this.rawMarkers = reconciled.rawMarkers.map((r) => ({ start: r.start, end: r.end }));
+    this.inSec = reconciled.inSec;
+    this.outSec = reconciled.outSec;
+    this.settings = { ...reconciled.settings };
+    this.setView(reconciled.viewStartSec, reconciled.viewDurationSec);
   }
 
   /**
@@ -209,7 +247,7 @@ export class EditorState {
           this.detectionProgress = fraction;
         },
       );
-      this.rawSilenceRegions = silenceRegionsFromSpeechSegments(
+      this.rawMarkers = silenceRegionsFromSpeechSegments(
         segments,
         this.durationSec,
         this.settings.minSilenceMs,
@@ -234,42 +272,42 @@ export class EditorState {
   }
 
   /**
-   * Drag a silence marker; edits the underlying raw region so the buffer
-   * slider keeps working afterwards. This just tracks the cursor 1:1 —
-   * merge detection happens separately, only once the drag ends (see
-   * `finishSilenceMarkerDrag`). Checking on every move would let a merge
-   * get undone by the very next event: the edge is recomputed straight
-   * from the raw cursor position each time, so once merged, the next tiny
+   * Drag a marker; edits the underlying raw marker so the buffer slider
+   * keeps working afterwards. This just tracks the cursor 1:1 — merge
+   * detection happens separately, only once the drag ends (see
+   * `finishMarkerDrag`). Checking on every move would let a merge get
+   * undone by the very next event: the edge is recomputed straight from
+   * the raw cursor position each time, so once merged, the next tiny
    * mouse move would snap the boundary back to wherever the cursor
    * happens to be, discarding the extension the merge just made.
    */
-  moveSilenceMarker(regionIndex: number, edge: "start" | "end", newDisplayedSec: number): void {
-    const raw = this.rawSilenceRegions[regionIndex];
+  moveMarker(markerIndex: number, edge: "start" | "end", newDisplayedSec: number): void {
+    const raw = this.rawMarkers[markerIndex];
     if (!raw) return;
     const clamped = clamp(newDisplayedSec, 0, this.durationSec);
-    const next = [...this.rawSilenceRegions];
-    next[regionIndex] = moveSilenceMarker(raw, this.settings.bufferMs, edge, clamped);
-    this.rawSilenceRegions = next;
+    const next = [...this.rawMarkers];
+    next[markerIndex] = moveMarker(raw, this.settings.bufferMs, edge, clamped);
+    this.rawMarkers = next;
   }
 
   /**
-   * Call once a silence-marker drag ends. If the dragged region now
-   * overlaps a neighbor by more than `AUTO_MERGE_OVERLAP_FRACTION` of
-   * whichever of the two is shorter, they merge into one — drag mark B's
-   * start 4 of its own 10 seconds into mark A and the two become one
-   * region, and the same holds dragging A into B. Below that threshold
-   * they're left overlapping as dragged, matching a manual Mark/Unmark
-   * decision instead of an automatic one.
+   * Call once a marker drag ends. If the dragged marker now overlaps a
+   * neighbor by more than `AUTO_MERGE_OVERLAP_FRACTION` of whichever of
+   * the two is shorter, they merge into one — drag mark B's start 4 of
+   * its own 10 seconds into mark A and the two become one marker, and
+   * the same holds dragging A into B. Below that threshold they're left
+   * overlapping as dragged, matching a manual Mark/Unmark decision
+   * instead of an automatic one.
    */
-  finishSilenceMarkerDrag(regionIndex: number): void {
-    const dragged = this.rawSilenceRegions[regionIndex];
+  finishMarkerDrag(markerIndex: number): void {
+    const dragged = this.rawMarkers[markerIndex];
     if (!dragged) return;
 
     let merged = dragged;
-    const survivors: RawSilenceRegion[] = [];
-    for (let i = 0; i < this.rawSilenceRegions.length; i++) {
-      if (i === regionIndex) continue;
-      const other = this.rawSilenceRegions[i];
+    const survivors: RawMarker[] = [];
+    for (let i = 0; i < this.rawMarkers.length; i++) {
+      if (i === markerIndex) continue;
+      const other = this.rawMarkers[i];
       const overlapStart = Math.max(merged.start, other.start);
       const overlapEnd = Math.min(merged.end, other.end);
       const overlapSec = Math.max(0, overlapEnd - overlapStart);
@@ -282,7 +320,7 @@ export class EditorState {
     }
 
     if (merged === dragged) return;
-    this.rawSilenceRegions = [...survivors, merged].sort((a, b) => a.start - b.start);
+    this.rawMarkers = [...survivors, merged].sort((a, b) => a.start - b.start);
   }
 
   /** Update the pending drag-to-select range. Order-independent; call repeatedly while dragging. */
@@ -305,7 +343,7 @@ export class EditorState {
     if (this.selectionStartSec === null || this.selectionEndSec === null) return;
     const start = Math.min(this.selectionStartSec, this.selectionEndSec);
     const end = Math.max(this.selectionStartSec, this.selectionEndSec);
-    this.rawSilenceRegions = unionInterval(this.rawSilenceRegions, start, end);
+    this.rawMarkers = unionInterval(this.rawMarkers, start, end);
     this.clearSelection();
   }
 
@@ -317,7 +355,7 @@ export class EditorState {
     if (this.selectionStartSec === null || this.selectionEndSec === null) return;
     const start = Math.min(this.selectionStartSec, this.selectionEndSec);
     const end = Math.max(this.selectionStartSec, this.selectionEndSec);
-    this.rawSilenceRegions = subtractInterval(this.rawSilenceRegions, start, end);
+    this.rawMarkers = subtractInterval(this.rawMarkers, start, end);
     this.clearSelection();
   }
 
@@ -337,7 +375,7 @@ export class EditorState {
     if (this.selectionStartSec === null || this.selectionEndSec === null) return;
     const start = Math.min(this.selectionStartSec, this.selectionEndSec);
     const end = Math.max(this.selectionStartSec, this.selectionEndSec);
-    const fraction = overlapFraction(this.rawSilenceRegions, start, end);
+    const fraction = overlapFraction(this.rawMarkers, start, end);
     if (fraction >= AUTO_MERGE_OVERLAP_FRACTION && fraction < 1) this.markSelection();
   }
 
