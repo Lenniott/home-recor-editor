@@ -2,10 +2,25 @@ import { describe, expect, it } from "vitest";
 import {
   applySilenceBuffer,
   moveMarker,
+  silenceRegionsFromAmplitude,
   silenceRegionsFromSpeechSegments,
   subtractInterval,
   unionInterval,
 } from "./silence";
+
+const SAMPLE_RATE = 1000;
+
+/** Builds a signal from seconds-long segments, each either loud (amplitude 1) or quiet (given amplitude). */
+function buildSignal(segments: { seconds: number; amplitude: number }[]): Float32Array {
+  const totalSamples = segments.reduce((sum, s) => sum + Math.round(s.seconds * SAMPLE_RATE), 0);
+  const samples = new Float32Array(totalSamples);
+  let i = 0;
+  for (const segment of segments) {
+    const count = Math.round(segment.seconds * SAMPLE_RATE);
+    for (let j = 0; j < count; j++) samples[i++] = segment.amplitude;
+  }
+  return samples;
+}
 
 describe("silenceRegionsFromSpeechSegments", () => {
   it("finds the gap between two speech segments", () => {
@@ -73,6 +88,66 @@ describe("silenceRegionsFromSpeechSegments", () => {
     expect(regions).toHaveLength(1);
     expect(regions[0].start).toBeCloseTo(0.2);
     expect(regions[0].end).toBeCloseTo(0.5);
+  });
+});
+
+describe("silenceRegionsFromAmplitude", () => {
+  it("flags a quiet block between loud ones", () => {
+    const samples = buildSignal([
+      { seconds: 1, amplitude: 1 },
+      { seconds: 1, amplitude: 0.001 },
+      { seconds: 1, amplitude: 1 },
+    ]);
+
+    const regions = silenceRegionsFromAmplitude(samples, SAMPLE_RATE, -40, 100);
+
+    expect(regions).toHaveLength(1);
+    expect(regions[0].start).toBeCloseTo(1);
+    expect(regions[0].end).toBeCloseTo(2);
+  });
+
+  it("ignores a quiet blip shorter than minSilenceMs", () => {
+    const samples = buildSignal([
+      { seconds: 1, amplitude: 1 },
+      { seconds: 0.05, amplitude: 0.001 },
+      { seconds: 1, amplitude: 1 },
+    ]);
+
+    const regions = silenceRegionsFromAmplitude(samples, SAMPLE_RATE, -40, 200);
+
+    expect(regions).toHaveLength(0);
+  });
+
+  it("returns nothing when the whole signal is loud", () => {
+    const samples = buildSignal([{ seconds: 2, amplitude: 1 }]);
+
+    expect(silenceRegionsFromAmplitude(samples, SAMPLE_RATE, -40, 100)).toHaveLength(0);
+  });
+
+  it("treats an entirely quiet signal as one region spanning the whole duration", () => {
+    const samples = buildSignal([{ seconds: 2, amplitude: 0.001 }]);
+
+    const regions = silenceRegionsFromAmplitude(samples, SAMPLE_RATE, -40, 100);
+
+    expect(regions).toHaveLength(1);
+    expect(regions[0].start).toBeCloseTo(0);
+    expect(regions[0].end).toBeCloseTo(2);
+  });
+
+  it("a more lenient (less negative) threshold catches quieter-but-not-silent audio a strict one misses", () => {
+    // -20dB (amplitude 0.1) — quieter than speech, louder than near-silence.
+    const samples = buildSignal([
+      { seconds: 1, amplitude: 1 },
+      { seconds: 1, amplitude: 0.1 },
+      { seconds: 1, amplitude: 1 },
+    ]);
+
+    expect(silenceRegionsFromAmplitude(samples, SAMPLE_RATE, -15, 100)).toHaveLength(1);
+    expect(silenceRegionsFromAmplitude(samples, SAMPLE_RATE, -30, 100)).toHaveLength(0);
+  });
+
+  it("returns nothing for an empty signal", () => {
+    expect(silenceRegionsFromAmplitude(new Float32Array(0), SAMPLE_RATE, -40, 100)).toEqual([]);
   });
 });
 

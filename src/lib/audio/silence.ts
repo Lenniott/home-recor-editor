@@ -60,6 +60,60 @@ export function silenceRegionsFromSpeechSegments(
   return regions;
 }
 
+/** Frame size for the amplitude scan below — short enough to localize a quiet span's edges, long enough for RMS to be a stable loudness estimate. */
+const AMPLITUDE_FRAME_MS = 20;
+/** RMS-to-dB floor, so a frame of exact digital silence (`rms === 0`) yields a finite number instead of `-Infinity`. */
+const DB_FLOOR = -100;
+
+function rmsToDb(rms: number): number {
+  return rms > 0 ? Math.max(DB_FLOOR, 20 * Math.log10(rms)) : DB_FLOOR;
+}
+
+/**
+ * Second, non-ML way to find silence: flag any stretch quieter than
+ * `thresholdDb`, regardless of whether a speech model would call it
+ * speech. Catches what VAD misses when it mistakes mic bleed or room
+ * tone for speech — a raw loudness floor doesn't care what the sound
+ * *is*, only how loud it is. Unlike `silenceRegionsFromSpeechSegments`,
+ * this finds silence directly rather than inverting speech into gaps,
+ * since there's no separate "speech" pass to invert.
+ */
+export function silenceRegionsFromAmplitude(
+  samples: Float32Array,
+  sampleRate: number,
+  thresholdDb: number,
+  minSilenceMs: number,
+): RawMarker[] {
+  if (samples.length === 0 || sampleRate <= 0) return [];
+
+  const frameSize = Math.max(1, Math.round((sampleRate * AMPLITUDE_FRAME_MS) / 1000));
+  const minSilenceSec = minSilenceMs / 1000;
+  const regions: RawMarker[] = [];
+
+  let quietStartSec: number | null = null;
+  for (let frameStart = 0; frameStart < samples.length; frameStart += frameSize) {
+    const frameEnd = Math.min(samples.length, frameStart + frameSize);
+    let sumSquares = 0;
+    for (let i = frameStart; i < frameEnd; i++) sumSquares += samples[i] * samples[i];
+    const rms = Math.sqrt(sumSquares / (frameEnd - frameStart));
+    const isQuiet = rmsToDb(rms) <= thresholdDb;
+
+    if (isQuiet && quietStartSec === null) {
+      quietStartSec = frameStart / sampleRate;
+    } else if (!isQuiet && quietStartSec !== null) {
+      const endSec = frameStart / sampleRate;
+      if (endSec - quietStartSec >= minSilenceSec) regions.push({ start: quietStartSec, end: endSec });
+      quietStartSec = null;
+    }
+  }
+  if (quietStartSec !== null) {
+    const endSec = samples.length / sampleRate;
+    if (endSec - quietStartSec >= minSilenceSec) regions.push({ start: quietStartSec, end: endSec });
+  }
+
+  return regions;
+}
+
 /**
  * Pad each raw marker inward by `bufferMs` on both sides. Markers the
  * buffer collapses entirely (start would land at or after end) get

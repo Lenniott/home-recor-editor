@@ -14,6 +14,7 @@ export interface ProjectSettings {
   positiveSpeechThreshold: number;
   minSilenceMs: number;
   bufferMs: number;
+  quietThresholdDb: number;
 }
 
 export interface ProjectFile {
@@ -30,6 +31,8 @@ export interface ProjectFile {
 }
 
 const CURRENT_VERSION = 1;
+/** Fallback for sidecars saved before `quietThresholdDb` existed — matches `DEFAULT_SETTINGS.quietThresholdDb` in `editor.svelte.ts` (duplicated, not imported, to keep this module dependency-free). */
+const DEFAULT_QUIET_THRESHOLD_DB = -40;
 
 /** Sidecar extension, chosen to avoid colliding with an unrelated `<stem>.json`. */
 const SIDECAR_SUFFIX = ".hre.json";
@@ -85,7 +88,18 @@ function isValidRegion(value: unknown): value is ProjectRegion {
   return isFiniteNumber(region.start) && isFiniteNumber(region.end) && region.end > region.start;
 }
 
-function isValidSettings(value: unknown): value is ProjectSettings {
+/**
+ * Checks only the settings fields that have existed since version 1 of
+ * the format. Newer fields (like `quietThresholdDb`) are deliberately
+ * NOT required here — a sidecar saved before a field existed is still a
+ * valid sidecar, just missing a value `parseProjectFile` fills in with a
+ * default below. Requiring every current field would silently fail the
+ * *entire* parse for any older save the moment a new setting is added,
+ * which is exactly the bug this guards against.
+ */
+function hasCoreSettingsFields(
+  value: unknown,
+): value is Pick<ProjectSettings, "positiveSpeechThreshold" | "minSilenceMs" | "bufferMs"> {
   if (typeof value !== "object" || value === null) return false;
   const settings = value as Record<string, unknown>;
   return (
@@ -117,10 +131,17 @@ export function parseProjectFile(json: string): ProjectFile | null {
   if (!isFiniteNumber(candidate.durationSec)) return null;
   if (!isFiniteNumber(candidate.inSec) || !isFiniteNumber(candidate.outSec)) return null;
   if (!isFiniteNumber(candidate.viewStartSec) || !isFiniteNumber(candidate.viewDurationSec)) return null;
-  if (!isValidSettings(candidate.settings)) return null;
+  if (!hasCoreSettingsFields(candidate.settings)) return null;
   if (!Array.isArray(candidate.rawMarkers)) return null;
 
   const rawMarkers = candidate.rawMarkers.filter(isValidRegion);
+  const rawSettings = candidate.settings as Record<string, unknown>;
+  const settings: ProjectSettings = {
+    ...candidate.settings,
+    quietThresholdDb: isFiniteNumber(rawSettings.quietThresholdDb)
+      ? rawSettings.quietThresholdDb
+      : DEFAULT_QUIET_THRESHOLD_DB,
+  };
 
   return {
     version: CURRENT_VERSION,
@@ -129,7 +150,7 @@ export function parseProjectFile(json: string): ProjectFile | null {
     rawMarkers,
     inSec: candidate.inSec,
     outSec: candidate.outSec,
-    settings: candidate.settings,
+    settings,
     viewStartSec: candidate.viewStartSec,
     viewDurationSec: candidate.viewDurationSec,
   };

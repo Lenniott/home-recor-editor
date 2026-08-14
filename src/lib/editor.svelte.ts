@@ -2,6 +2,7 @@ import { adjacentMarkedRegion, fitWindow, type NavDirection } from "./audio/mark
 import {
   applySilenceBuffer,
   moveMarker,
+  silenceRegionsFromAmplitude,
   silenceRegionsFromSpeechSegments,
   subtractInterval,
   unionInterval,
@@ -31,12 +32,15 @@ export interface SilenceSettings {
   positiveSpeechThreshold: number;
   minSilenceMs: number;
   bufferMs: number;
+  /** Loudness floor (dB) for the secondary amplitude-based detector — see `runQuietDetection`. */
+  quietThresholdDb: number;
 }
 
 const DEFAULT_SETTINGS: SilenceSettings = {
   positiveSpeechThreshold: 0.5,
-  minSilenceMs: 300,
+  minSilenceMs: 1200,
   bufferMs: 150,
+  quietThresholdDb: -40,
 };
 
 /** Silero's suggested gap between the positive and negative thresholds. */
@@ -113,6 +117,7 @@ function snapshotsEqual(a: SessionSnapshot, b: SessionSnapshot): boolean {
     a.settings.positiveSpeechThreshold === b.settings.positiveSpeechThreshold &&
     a.settings.minSilenceMs === b.settings.minSilenceMs &&
     a.settings.bufferMs === b.settings.bufferMs &&
+    a.settings.quietThresholdDb === b.settings.quietThresholdDb &&
     regionsEqual(a.rawMarkers, b.rawMarkers)
   );
 }
@@ -453,6 +458,33 @@ export class EditorState {
 
   setBufferMs(bufferMs: number): void {
     this.settings = { ...this.settings, bufferMs: Math.max(0, bufferMs) };
+  }
+
+  setQuietThresholdDb(quietThresholdDb: number): void {
+    this.settings = { ...this.settings, quietThresholdDb };
+  }
+
+  /**
+   * Second, non-ML detection pass (see `silenceRegionsFromAmplitude`):
+   * flags anything quieter than `settings.quietThresholdDb`, independent
+   * of whether VAD thinks it's speech. Unlike `runSilenceDetection`, this
+   * *adds* to whatever markers already exist — folding each newly found
+   * span through `unionInterval` merges it into a touching marker rather
+   * than replacing the set, so nudging the dB slider and re-running never
+   * loses VAD output or manual marks. Synchronous (no model, no worker),
+   * so one `commitEdit` call is enough for a single undo step.
+   */
+  runQuietDetection(): void {
+    if (!this.hasAudio) return;
+    this.commitEdit(() => {
+      const quiet = silenceRegionsFromAmplitude(
+        this.monoSamples,
+        this.sampleRate,
+        this.settings.quietThresholdDb,
+        this.settings.minSilenceMs,
+      );
+      this.rawMarkers = quiet.reduce((acc, r) => unionInterval(acc, r.start, r.end), this.rawMarkers);
+    });
   }
 
   /**

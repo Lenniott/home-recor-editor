@@ -32,7 +32,7 @@ describe("serializeProject / parseProjectFile round-trip", () => {
     rawMarkers: [{ start: 1, end: 2 }, { start: 5, end: 6 }],
     inSec: 0,
     outSec: 120,
-    settings: { positiveSpeechThreshold: 0.5, minSilenceMs: 300, bufferMs: 150 },
+    settings: { positiveSpeechThreshold: 0.5, minSilenceMs: 300, bufferMs: 150, quietThresholdDb: -40 },
     viewStartSec: 3,
     viewDurationSec: 45,
   };
@@ -70,7 +70,7 @@ describe("parseProjectFile validation", () => {
       rawMarkers: [],
       inSec: 0,
       outSec: 1,
-      settings: { positiveSpeechThreshold: 0.5, minSilenceMs: 300, bufferMs: 150 },
+      settings: { positiveSpeechThreshold: 0.5, minSilenceMs: 300, bufferMs: 150, quietThresholdDb: -40 },
       viewStartSec: 0,
       viewDurationSec: 1,
     });
@@ -92,10 +92,65 @@ describe("parseProjectFile validation", () => {
       rawMarkers: [],
       inSec: 0,
       outSec: 10,
-      settings: { positiveSpeechThreshold: 0.5, minSilenceMs: 300, bufferMs: 150 },
+      settings: { positiveSpeechThreshold: 0.5, minSilenceMs: 300, bufferMs: 150, quietThresholdDb: -40 },
     });
 
     expect(parseProjectFile(json)).toBeNull();
+  });
+
+  it("returns null when a core settings field is missing", () => {
+    const json = JSON.stringify({
+      version: 1,
+      audioFileName: "a.wav",
+      durationSec: 10,
+      rawMarkers: [],
+      inSec: 0,
+      outSec: 10,
+      settings: { positiveSpeechThreshold: 0.5, minSilenceMs: 300 },
+      viewStartSec: 0,
+      viewDurationSec: 10,
+    });
+
+    expect(parseProjectFile(json)).toBeNull();
+  });
+
+  it("defaults quietThresholdDb for a sidecar saved before that field existed, instead of failing the whole parse", () => {
+    // Regression test: a sidecar saved by an older version of the app is
+    // still a valid, loadable file — a newly added setting must never
+    // turn a real save into a silent total loss of every mark in it.
+    const json = JSON.stringify({
+      version: 1,
+      audioFileName: "a.wav",
+      durationSec: 10,
+      rawMarkers: [{ start: 1, end: 2 }],
+      inSec: 0,
+      outSec: 10,
+      settings: { positiveSpeechThreshold: 0.5, minSilenceMs: 300, bufferMs: 150 },
+      viewStartSec: 0,
+      viewDurationSec: 10,
+    });
+
+    const parsed = parseProjectFile(json);
+
+    expect(parsed).not.toBeNull();
+    expect(parsed?.rawMarkers).toEqual([{ start: 1, end: 2 }]);
+    expect(parsed?.settings.quietThresholdDb).toBe(-40);
+  });
+
+  it("keeps a saved quietThresholdDb rather than overriding it with the default", () => {
+    const json = JSON.stringify({
+      version: 1,
+      audioFileName: "a.wav",
+      durationSec: 10,
+      rawMarkers: [],
+      inSec: 0,
+      outSec: 10,
+      settings: { positiveSpeechThreshold: 0.5, minSilenceMs: 300, bufferMs: 150, quietThresholdDb: -55 },
+      viewStartSec: 0,
+      viewDurationSec: 10,
+    });
+
+    expect(parseProjectFile(json)?.settings.quietThresholdDb).toBe(-55);
   });
 
   it("drops invalid individual markers instead of failing the whole parse", () => {
@@ -106,7 +161,7 @@ describe("parseProjectFile validation", () => {
       rawMarkers: [{ start: 1, end: 2 }, { start: 5, end: 3 }, { start: "x", end: 4 }],
       inSec: 0,
       outSec: 10,
-      settings: { positiveSpeechThreshold: 0.5, minSilenceMs: 300, bufferMs: 150 },
+      settings: { positiveSpeechThreshold: 0.5, minSilenceMs: 300, bufferMs: 150, quietThresholdDb: -40 },
       viewStartSec: 0,
       viewDurationSec: 10,
     });
@@ -125,7 +180,7 @@ describe("reconcileProjectWithDuration", () => {
     rawMarkers: [{ start: 1, end: 2 }, { start: 8, end: 12 }, { start: 15, end: 20 }],
     inSec: 0,
     outSec: 10,
-    settings: { positiveSpeechThreshold: 0.5, minSilenceMs: 300, bufferMs: 150 },
+    settings: { positiveSpeechThreshold: 0.5, minSilenceMs: 300, bufferMs: 150, quietThresholdDb: -40 },
     viewStartSec: 2,
     viewDurationSec: 10,
   };

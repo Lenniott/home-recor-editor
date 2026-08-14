@@ -44,7 +44,11 @@
     editor.setBufferMs(Number((e.currentTarget as HTMLInputElement).value));
   }
 
-  // The three settings sliders fire `oninput` on every drag tick, but a
+  function onQuietThreshold(e: Event): void {
+    editor.setQuietThresholdDb(Number((e.currentTarget as HTMLInputElement).value));
+  }
+
+  // The settings sliders fire `oninput` on every drag tick, but a
   // drag should still cost one undo step, not one per tick — same
   // transaction-around-the-gesture pattern as Waveform's pointer drags.
   function beginSliderEdit(): void {
@@ -85,7 +89,7 @@
     <span class="label">Min length</span>
     <input
       type="range"
-      min="50"
+      min="100"
       max="3000"
       step="50"
       value={editor.settings.minSilenceMs}
@@ -117,6 +121,32 @@
 
   <button class="detect" onclick={() => editor.runSilenceDetection()} disabled={!editor.hasAudio || editor.isDetectingSilence}>
     {editor.isDetectingSilence ? `Detecting… ${Math.round(editor.detectionProgress * 100)}%` : "Detect Silence"}
+  </button>
+
+  <label class="control" title="Loudness floor for a second, non-ML detection pass — catches quiet stretches VAD mistakes for speech (e.g. mic bleed)">
+    <span class="label">Quiet threshold</span>
+    <input
+      type="range"
+      min="-60"
+      max="-15"
+      step="1"
+      value={editor.settings.quietThresholdDb}
+      oninput={onQuietThreshold}
+      onpointerdown={beginSliderEdit}
+      onpointerup={endSliderEdit}
+      onpointercancel={endSliderEdit}
+      disabled={!editor.hasAudio}
+    />
+    <span class="value">{editor.settings.quietThresholdDb} dB</span>
+  </label>
+
+  <button
+    class="detect"
+    onclick={() => editor.runQuietDetection()}
+    disabled={!editor.hasAudio}
+    title="Adds any audio quieter than the threshold above to your existing markers, without replacing them"
+  >
+    Detect Quiet Audio
   </button>
 
   <span class="count">{markerCount} region{markerCount === 1 ? "" : "s"}</span>
