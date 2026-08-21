@@ -1,6 +1,9 @@
 <script lang="ts">
-  import { editor } from "../editor.svelte";
-  import { player } from "../player";
+  import { editor as defaultEditor, type EditorState } from "../editor.svelte";
+  import { player as defaultPlayer, type AudioPlayer } from "../player";
+
+  /** Defaults to the app-wide singletons — see `Waveform.svelte`'s same prop pair. */
+  let { editor = defaultEditor, player = defaultPlayer }: { editor?: EditorState; player?: AudioPlayer } = $props();
 
   function formatTime(totalSeconds: number): string {
     const s = Math.max(0, totalSeconds);

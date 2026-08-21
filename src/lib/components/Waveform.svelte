@@ -1,9 +1,44 @@
 <script lang="ts">
-  import { editor } from "../editor.svelte";
-  import { player } from "../player";
+  import { editor as defaultEditor, type EditorState } from "../editor.svelte";
+  import { player as defaultPlayer, type AudioPlayer } from "../player";
   import { computePeaksRange, type PeakColumns } from "../audio/peaks";
   import { keptToSource, sourceToKept, type TimelineSpan } from "../audio/timelineMap";
   import { theme } from "../theme";
+
+  /**
+   * Which track this waveform shows and controls playback for — defaults
+   * to the app-wide singletons so `<Waveform />` keeps working unchanged
+   * for single-track use. A multi-track session (see `session.svelte.ts`)
+   * mounts this once per `EditorState`/`AudioPlayer` pair.
+   *
+   * `view`/`onViewChange` let a caller override where this waveform's
+   * scroll/zoom window comes from — the shared DAW-style ruler pattern
+   * (`Timeline.svelte` + `SessionState.viewStartSec/viewDurationSec`):
+   * every track row reads/writes the same window instead of scrolling
+   * independently. Falls back to this track's own `editor.viewStartSec`/
+   * `viewDurationSec` when omitted (still true for `SilenceControls`'
+   * view-filter zoom-to-fit, which always targets a specific track).
+   */
+  let {
+    editor = defaultEditor,
+    player = defaultPlayer,
+    view,
+    onViewChange,
+  }: {
+    editor?: EditorState;
+    player?: AudioPlayer;
+    view?: { startSec: number; durationSec: number };
+    onViewChange?: (startSec: number, durationSec: number) => void;
+  } = $props();
+
+  const viewStartSec = $derived(view?.startSec ?? editor.viewStartSec);
+  const viewDurationSec = $derived(view?.durationSec ?? editor.viewDurationSec);
+
+  /** Writes a new view window to wherever it came from — the shared session view if `view` was supplied, else this track's own. */
+  function setView(startSec: number, durationSec: number): void {
+    if (onViewChange) onViewChange(startSec, durationSec);
+    else editor.setView(startSec, durationSec);
+  }
 
   let container: HTMLDivElement | undefined;
   let canvas: HTMLCanvasElement | undefined = $state();
@@ -42,8 +77,8 @@
    * without a pixel-only reservation there'd be nothing to drag apart.
    */
   const layout = $derived.by(() => {
-    const viewStart = editor.viewStartSec;
-    const viewEnd = editor.viewStartSec + editor.viewDurationSec;
+    const viewStart = viewStartSec;
+    const viewEnd = viewStartSec + viewDurationSec;
     const gutters = editor.timelineSpans
       .filter((span) => span.kind === "hidden" && span.keptStart >= viewStart - EPS && span.keptStart <= viewEnd + EPS)
       .map((span) => span.keptStart);
@@ -53,7 +88,7 @@
         ? Math.max(MIN_GUTTER_PX, Math.min(GUTTER_PX, (width * MAX_GUTTER_BUDGET_FRACTION) / gutters.length))
         : GUTTER_PX;
     const reservedPx = gutters.length * gutterPx;
-    const pixelsPerKeptSecond = editor.viewDurationSec > 0 ? Math.max(0, width - reservedPx) / editor.viewDurationSec : 0;
+    const pixelsPerKeptSecond = viewDurationSec > 0 ? Math.max(0, width - reservedPx) / viewDurationSec : 0;
 
     return { viewStartKept: viewStart, pps: pixelsPerKeptSecond, gutterPx, gutters };
   });
@@ -185,7 +220,7 @@
   }
 
   function refreshPeaksCache(): void {
-    let signature = `${editor.viewStartSec.toFixed(4)}:${editor.viewDurationSec.toFixed(4)}:${width}:${editor.monoSamples.length}`;
+    let signature = `${viewStartSec.toFixed(4)}:${viewDurationSec.toFixed(4)}:${width}:${editor.monoSamples.length}`;
     for (const span of editor.timelineSpans) {
       signature += `|${span.kind === "keep" ? "k" : "h"}${span.sourceStart.toFixed(4)}-${span.sourceEnd.toFixed(4)}`;
     }
@@ -209,8 +244,8 @@
 
     const centerY = height / 2;
     const halfHeight = height / 2 - 6;
-    const viewStart = editor.viewStartSec;
-    const viewEnd = editor.viewStartSec + editor.viewDurationSec;
+    const viewStart = viewStartSec;
+    const viewEnd = viewStartSec + viewDurationSec;
 
     ctx.fillStyle = theme.amber;
     for (const span of editor.timelineSpans) {
@@ -460,8 +495,8 @@
     // Reads below make this effect re-run whenever any of them change,
     // without touching the canvas bitmap itself.
     editor.monoSamples;
-    editor.viewStartSec;
-    editor.viewDurationSec;
+    viewStartSec;
+    viewDurationSec;
     editor.viewFilter;
     editor.timelineSpans;
     editor.playheadSec;
@@ -541,12 +576,12 @@
   function flushWheel(): void {
     if (wheelIsZoom) {
       const anchorKept = xToKept(wheelAnchorX);
-      const newDuration = clamp(editor.viewDurationSec * wheelZoomFactor, MIN_VIEW_DURATION_SEC, editor.displayKeptDuration || 1);
+      const newDuration = clamp(viewDurationSec * wheelZoomFactor, MIN_VIEW_DURATION_SEC, editor.displayKeptDuration || 1);
       const ratio = width > 0 ? wheelAnchorX / width : 0.5;
-      editor.setView(anchorKept - ratio * newDuration, newDuration);
+      setView(anchorKept - ratio * newDuration, newDuration);
       wheelZoomFactor = 1;
     } else {
-      editor.setView(editor.viewStartSec + wheelPanDeltaSec, editor.viewDurationSec);
+      setView(viewStartSec + wheelPanDeltaSec, viewDurationSec);
       wheelPanDeltaSec = 0;
     }
   }
@@ -587,7 +622,7 @@
       wheelAnchorX = e.offsetX;
       wheelZoomFactor *= Math.exp(e.deltaY * ZOOM_SENSITIVITY);
     } else {
-      wheelPanDeltaSec += (e.deltaX || e.deltaY) * (editor.viewDurationSec / Math.max(1, width));
+      wheelPanDeltaSec += (e.deltaX || e.deltaY) * (viewDurationSec / Math.max(1, width));
     }
     scheduleWheelFlush();
   }

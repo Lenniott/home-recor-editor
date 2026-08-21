@@ -137,6 +137,15 @@ export class EditorState {
   audioBuffer: AudioBuffer | null = $state(null);
   monoSamples: Float32Array = $state(new Float32Array(0));
 
+  /**
+   * Manual time-sync offset against a paired track, in seconds — used only
+   * when this instance is one of two tracks in a `SessionState` (see
+   * `session.svelte.ts`). Positive means this track's audio starts later
+   * relative to the other track, so its content should shift *later* onto
+   * shared "session time". Ignored entirely in single-track use.
+   */
+  offsetSec: number = $state(0);
+
   playheadSec: number = $state(0);
   isPlaying: boolean = $state(false);
   loopInOut: boolean = $state(false);
@@ -364,8 +373,7 @@ export class EditorState {
    * revert.
    */
   applySilenceMarked(): void {
-    if (!this.hasAudio || this.markedIntervals.length === 0) return;
-    this.rewriteBuffer((channels) => silenceMarked(channels, this.sampleRate, this.markedIntervals));
+    this.applyMarkedRegions(this.markedIntervals, "silence");
   }
 
   /**
@@ -375,8 +383,26 @@ export class EditorState {
    * region; throws if every region is marked, since nothing would remain.
    */
   applyRemoveMarked(): void {
-    if (!this.hasAudio || this.markedIntervals.length === 0) return;
-    this.rewriteBuffer((channels) => removeMarked(channels, this.sampleRate, this.markedIntervals));
+    this.applyMarkedRegions(this.markedIntervals, "remove");
+  }
+
+  /**
+   * Bake an arbitrary set of marked intervals into the buffer — same
+   * mute/remove machinery as `applySilenceMarked`/`applyRemoveMarked`, but
+   * against a caller-supplied region list instead of `this.markedIntervals`.
+   * Used by `SessionState` (see `session.svelte.ts`) to apply *joint*
+   * silence regions (computed across two tracks) to this one track without
+   * touching this track's own `rawMarkers`/undo-independent detection
+   * state — joint apply is "run the existing per-track bake with someone
+   * else's region list," not a new editing concept.
+   */
+  applyMarkedRegions(marked: DisplayedInterval[], mode: "silence" | "remove"): void {
+    if (!this.hasAudio || marked.length === 0) return;
+    this.rewriteBuffer((channels) =>
+      mode === "silence"
+        ? silenceMarked(channels, this.sampleRate, marked)
+        : removeMarked(channels, this.sampleRate, marked),
+    );
   }
 
   /** Copy the current buffer's channels out (never mutate the live buffer in place), run `edit`, and swap in the result via `replaceAudio`. */

@@ -1,7 +1,10 @@
 <script lang="ts">
   import { currentRegionNumber } from "../audio/markerNav";
-  import { editor, type ViewFilter } from "../editor.svelte";
-  import { player } from "../player";
+  import { editor as defaultEditor, type EditorState, type ViewFilter } from "../editor.svelte";
+  import { player as defaultPlayer, type AudioPlayer } from "../player";
+
+  /** Defaults to the app-wide singletons — see `Waveform.svelte`'s same prop pair. */
+  let { editor = defaultEditor, player = defaultPlayer }: { editor?: EditorState; player?: AudioPlayer } = $props();
 
   const markerCount = $derived(editor.markers.filter((r) => r.displayed).length);
   const currentNumber = $derived(currentRegionNumber(editor.markedIntervals, editor.playheadSec));
