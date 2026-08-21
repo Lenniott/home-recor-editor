@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   applySilenceBuffer,
+  intersectRegions,
   moveMarker,
   silenceRegionsFromAmplitude,
   silenceRegionsFromSpeechSegments,
@@ -266,5 +267,48 @@ describe("moveMarker", () => {
 
     expect(moveMarker(raw, 100, "start", 5).start).toBeLessThanOrEqual(2);
     expect(moveMarker(raw, 100, "end", -5).end).toBeGreaterThanOrEqual(1);
+  });
+});
+
+describe("intersectRegions", () => {
+  it("returns nothing when the two sets never overlap", () => {
+    const result = intersectRegions([{ start: 0, end: 1 }], [{ start: 2, end: 3 }]);
+    expect(result).toEqual([]);
+  });
+
+  it("returns the fully-contained region when one region sits entirely inside the other", () => {
+    const result = intersectRegions([{ start: 0, end: 10 }], [{ start: 3, end: 5 }]);
+    expect(result).toEqual([{ start: 3, end: 5 }]);
+  });
+
+  it("returns only the overlap on a partial overlap", () => {
+    const result = intersectRegions([{ start: 0, end: 5 }], [{ start: 3, end: 8 }]);
+    expect(result).toEqual([{ start: 3, end: 5 }]);
+  });
+
+  it("excludes regions that only touch at a boundary", () => {
+    const result = intersectRegions([{ start: 0, end: 2 }], [{ start: 2, end: 4 }]);
+    expect(result).toEqual([]);
+  });
+
+  it("sweeps across multiple regions on both sides", () => {
+    // a: not-speaking 0-2, 4-6, 8-10 ; b: not-speaking 1-3, 5-9
+    const a = [{ start: 0, end: 2 }, { start: 4, end: 6 }, { start: 8, end: 10 }];
+    const b = [{ start: 1, end: 3 }, { start: 5, end: 9 }];
+
+    const result = intersectRegions(a, b);
+
+    expect(result).toEqual([
+      { start: 1, end: 2 },
+      { start: 5, end: 6 },
+      { start: 8, end: 9 },
+    ]);
+  });
+
+  it("is symmetric — order of arguments doesn't change the result", () => {
+    const a = [{ start: 0, end: 2 }, { start: 4, end: 6 }];
+    const b = [{ start: 1, end: 5 }];
+
+    expect(intersectRegions(a, b)).toEqual(intersectRegions(b, a));
   });
 });

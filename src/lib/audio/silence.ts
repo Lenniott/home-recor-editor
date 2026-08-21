@@ -184,6 +184,32 @@ export function unionInterval(
 }
 
 /**
+ * Intersect two sorted, non-overlapping sets of regions (as returned by
+ * `silenceRegionsFromSpeechSegments`/`silenceRegionsFromAmplitude`):
+ * only the spans present in *both* survive. Used to combine two tracks'
+ * "not speaking" regions into "neither is speaking" — e.g. background
+ * noise (a car, a dog) on one mic isn't loud-silence, but VAD still
+ * marks it not-speech, so the overlap of both tracks' not-speaking spans
+ * is the actual joint-silence answer. Classic sorted two-pointer sweep,
+ * O(n+m). Touching-but-not-overlapping spans (one ends exactly where the
+ * other starts) are excluded, matching `unionInterval`/`subtractInterval`'s
+ * `end <= start` convention elsewhere in this file.
+ */
+export function intersectRegions(a: RawMarker[], b: RawMarker[]): RawMarker[] {
+  const result: RawMarker[] = [];
+  let i = 0;
+  let j = 0;
+  while (i < a.length && j < b.length) {
+    const start = Math.max(a[i].start, b[j].start);
+    const end = Math.min(a[i].end, b[j].end);
+    if (end > start) result.push({ start, end });
+    if (a[i].end < b[j].end) i++;
+    else j++;
+  }
+  return result;
+}
+
+/**
  * Remove [start, end] from a set of raw regions. A range that carves out
  * the middle of a region splits it in two (e.g. marked 1-10, unmark 4-6
  * leaves 1-4 and 6-10); a range that only touches an edge trims that
