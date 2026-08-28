@@ -16,8 +16,7 @@
   import { vadDetector } from "$lib/vadDetector";
   import SilenceControls from "$lib/components/SilenceControls.svelte";
   import Timeline from "$lib/components/Timeline.svelte";
-  import TrackControls from "$lib/components/TrackControls.svelte";
-  import Waveform from "$lib/components/Waveform.svelte";
+  import TrackRow from "$lib/components/TrackRow.svelte";
 
   // Spin up the VAD worker at app start rather than waiting for the first
   // Detect click — see vadDetector.warmUp() for why that timing matters.
@@ -37,9 +36,6 @@
   let isDetectingJoint = $state(false);
   let jointError: string | null = $state(null);
   let isExportingJoint = $state(false);
-
-  /** Whole-column toggle — see `TrackControls.svelte`'s `mode` prop. Compact by default; "Track settings" switches every box to the full per-track settings stack at once. */
-  let leftPanelMode: "compact" | "full" = $state("compact");
 
   function formatTime(totalSeconds: number): string {
     const s = Math.max(0, totalSeconds);
@@ -399,16 +395,6 @@
 
       <div class="spacer"></div>
 
-      <button
-        class="toggle-panel"
-        onclick={() =>
-          (leftPanelMode = leftPanelMode === "compact" ? "full" : "compact")}
-      >
-        {leftPanelMode === "compact"
-          ? "Track settings"
-          : "Collapse track settings"}
-      </button>
-
       <div
         class="joint-nav"
         role="group"
@@ -495,30 +481,19 @@
         startSec: session.viewStartSec,
         durationSec: session.viewDurationSec,
       }}
-      <div class="timeline-area" class:full={leftPanelMode === "full"}>
+      <div class="timeline-area">
         <Timeline {view} />
         <div class="tracks-container">
           {#each session.tracks as track (track.editor)}
-            <div class="control-row">
-              <TrackControls
-                {track}
-                focused={session.focusedTrack === track}
-                mode={leftPanelMode}
-                onFocus={() => session.focus(track)}
-                onRemove={() => removeTrack(track)}
-                onSave={() => saveTrack(track.editor)}
-                onExport={() => exportTrack(track.editor)}
-              />
-              <div class="lane">
-                <Waveform
-                  editor={track.editor}
-                  player={track.player}
-                  {view}
-                  onViewChange={(startSec, durationSec) =>
-                    session.setView(startSec, durationSec)}
-                />
-              </div>
-            </div>
+            <TrackRow
+              {track}
+              {view}
+              onViewChange={(startSec, durationSec) =>
+                session.setView(startSec, durationSec)}
+              onRemove={() => removeTrack(track)}
+              onSave={() => saveTrack(track.editor)}
+              onExport={() => exportTrack(track.editor)}
+            />
           {/each}
         </div>
       </div>
@@ -636,12 +611,17 @@
     border-radius: 6px;
   }
 
-  /* Shared with Timeline's left offset so the ruler sits over the lanes, not the control boxes. */
+  /* Shared with compact TrackControls width so the ruler sits over remaining lanes, not the chrome. Inset stays 240px as long as any compact waveform exists. */
   .timeline-area {
-    --track-controls-width: 208px;
+    --track-controls-width: 240px;
     --track-gap: 0.6rem;
     min-width: 0;
     overflow: hidden;
+  }
+
+  .timeline-area:not(:has(:global(.control-row:not(.full)))) {
+    --track-controls-width: 0px;
+    --track-gap: 0px;
   }
 
   .timeline-area :global(.timeline) {
@@ -661,45 +641,6 @@
     flex-direction: column;
     gap: 0.25rem;
     width: 100%;
-  }
-
-  /* Fixed row height keeps each control box level with its waveform lane. Overflow lives on the control box so a long settings stack never clips the canvas. */
-  .control-row {
-    display: flex;
-    flex-direction: row;
-    align-items: stretch;
-    gap: var(--track-gap);
-    height: 160px;
-    min-width: 0;
-  }
-
-  .timeline-area.full .control-row {
-    height: 240px;
-  }
-
-  .control-row :global(.box) {
-    width: var(--track-controls-width);
-    flex-shrink: 0;
-    overflow-y: auto;
-  }
-
-  /* flex: 1 + min-width: 0 is what gives the canvas a real size — without it the lane shrinks to the canvas, the canvas to the lane, and both stay 0px. */
-  .lane {
-    flex: 1;
-    min-width: 0;
-    height: 100%;
-    border-bottom: 1px solid var(--panel-line);
-  }
-
-  .control-row:last-child .lane {
-    border-bottom: none;
-  }
-
-  /* Strip the standalone Waveform's own border/background — inside a lane it's one row of the shared timeline-area border, not its own box. */
-  .lane :global(.waveform) {
-    border: none;
-    border-radius: 0;
-    background: transparent;
   }
 
   .empty {

@@ -4,15 +4,15 @@
   interface Props {
     track: Track;
     focused: boolean;
-    /** Compact: filename + marker nav + Focus, nothing else. Full: adds the per-track settings (offset, apply, save/export, remove) — toggled for the whole left column at once, not per row. */
-    mode: "compact" | "full";
-    onFocus: () => void;
+    /** Compact: filename + marker nav + expand. Full: adds the per-track settings (offset, apply, save/export, remove). Owned per row, not page-wide. */
+    expanded: boolean;
+    onToggleExpanded: () => void;
     onRemove: () => void;
     onSave: () => void;
     onExport: () => void;
   }
 
-  let { track, focused, mode, onFocus, onRemove, onSave, onExport }: Props = $props();
+  let { track, focused, expanded, onToggleExpanded, onRemove, onSave, onExport }: Props = $props();
 
   const editor = $derived(track.editor);
   const player = $derived(track.player);
@@ -53,9 +53,12 @@
   }
 </script>
 
-<div class="box" class:focused role="group" aria-label={editor.fileName ?? "Track"}>
+<div class="trackcontrol" class:focused class:full={expanded} role="group" aria-label={editor.fileName ?? "Track"}>
   <div class="header">
     <span class="filename" title={editor.fileName ?? undefined}>{editor.fileName ?? "Untitled track"}</span>
+    <button class="expand" onclick={onToggleExpanded} aria-expanded={expanded} title={expanded ? "Collapse track settings" : "Expand track settings"}>
+      {expanded ? "Collapse" : "Expand"}
+    </button>
   </div>
 
   <div class="marker-nav">
@@ -64,11 +67,7 @@
     <button onclick={() => player.goToAdjacentMarkedRegion("next")} disabled={markerCount === 0} title="Next marked region">▶</button>
   </div>
 
-  <button class="focus" class:active={focused} onclick={onFocus} aria-pressed={focused} title="Route keyboard shortcuts ([, ], m, undo) to this track">
-    {focused ? "Focused" : "Focus"}
-  </button>
-
-  {#if mode === "full"}
+  {#if expanded}
     <label class="offset" title="Manual sync offset against the other tracks, in milliseconds">
       <span class="label">Sync</span>
       <input type="number" step="10" value={Math.round(editor.offsetSec * 1000)} oninput={onOffsetInput} />
@@ -97,17 +96,24 @@
 </div>
 
 <style>
-  .box {
+  .trackcontrol {
     display: flex;
     flex-direction: column;
     gap: 0.5rem;
+    width: 240px;
+    flex-shrink: 0;
+    overflow-y: auto;
     padding: 0.6rem;
     background: var(--panel);
     border: 1px solid var(--panel-line);
     border-radius: 6px;
   }
 
-  .box.focused {
+  .trackcontrol.full {
+    width: 100%;
+  }
+
+  .trackcontrol.focused {
     border-color: var(--amber);
     box-shadow: 0 0 0 1px var(--amber) inset;
   }
@@ -115,15 +121,24 @@
   .header {
     display: flex;
     align-items: center;
+    gap: 0.4rem;
   }
 
   .filename {
+    flex: 1;
+    min-width: 0;
     font-family: var(--font-mono);
     font-size: 0.78rem;
     color: var(--cream-dim);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+
+  .expand {
+    flex-shrink: 0;
+    font-size: 0.72rem;
+    padding: 0.2rem 0.5rem;
   }
 
   .marker-nav {
@@ -143,16 +158,6 @@
     font-size: 0.72rem;
     color: var(--cream-dim);
     white-space: nowrap;
-  }
-
-  .focus {
-    font-size: 0.72rem;
-    padding: 0.25rem 0.5rem;
-  }
-
-  .focus.active {
-    color: var(--chassis);
-    background: var(--amber);
   }
 
   .offset {

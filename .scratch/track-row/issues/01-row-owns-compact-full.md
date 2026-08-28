@@ -4,7 +4,7 @@
 
 **Blocked by:** None — can start immediately.
 
-**Status:** ready-for-agent
+**Status:** claimed
 
 - [ ] Each row has its own compact/full; there is no whole-column mode.
 - [ ] Compact: 240px chrome + waveform. Full: 100% chrome, waveform unmounted (not hidden with CSS).
