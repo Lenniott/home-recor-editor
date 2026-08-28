@@ -4,7 +4,7 @@
 
 **Blocked by:** None — can start immediately.
 
-**Status:** ready-for-agent
+**Status:** claimed
 
 - [ ] Drag on the ruler creates a pending session-time selection, visible on the ruler and on every compact waveform.
 - [ ] `m` with a session selection marks every track via `offsetSec`; a one-track session still works.
