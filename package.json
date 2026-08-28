@@ -11,7 +11,9 @@
     "check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch",
     "test": "vitest run",
     "test:watch": "vitest",
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "macos:setup": "bash scripts/macos-bundle.sh setup",
+    "bundle:mac": "bash scripts/macos-bundle.sh build"
   },
   "license": "MIT",
   "dependencies": {
