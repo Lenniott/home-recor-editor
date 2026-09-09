@@ -47,9 +47,9 @@ export class AudioPlayer {
     void context.resume();
     this.stopSources();
 
-    const boundary = this.editor.loopInOut ? this.editor.outSec : this.editor.durationSec;
+    const boundary = this.editor.durationSec;
     const atEnd = this.editor.playheadSec >= boundary - 0.001;
-    const startSec = atEnd ? this.editor.inSec : this.editor.playheadSec;
+    const startSec = atEnd ? 0 : this.editor.playheadSec;
 
     // Two tracks playing at once each contribute half, matching the
     // combined export mix — see the plan's export section.
@@ -157,7 +157,9 @@ export class AudioPlayer {
    */
   audition(range: { start: number; end: number }): void {
     this.editor.beginEdit();
-    this.seek(this.editor.focusRange(range));
+    this.editor.setPreview("original");
+    this.editor.setViewFilter("all");
+    this.seek(this.editor.focusRange({start: Math.max(0, range.start - 1), end: Math.min(this.editor.durationSec, range.end + 1)}));
     this.editor.endEdit();
     if (!this.editor.isPlaying) this.play();
   }
@@ -216,11 +218,6 @@ export class AudioPlayer {
 
   private handleEnded(): void {
     this.cancelTick();
-    if (this.editor.loopInOut) {
-      this.editor.setPlayhead(this.editor.inSec);
-      this.play();
-      return;
-    }
     this.editor.isPlaying = false;
   }
 

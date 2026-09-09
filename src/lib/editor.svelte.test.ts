@@ -297,6 +297,7 @@ describe("shared cuts", () => {
     editor.cutSelection();
 
     expect(editor.cuts).toEqual([{ start: 2, end: 4 }]);
+    editor.setPreview("edited");
     expect(editor.displayKeptDuration).toBe(8);
     expect(editor.timelineSpans.map((s) => [s.kind, s.sourceStart, s.sourceEnd])).toEqual([
       ["keep", 0, 2],
@@ -360,7 +361,7 @@ describe("cut suggestion review", () => {
 
     expect(editor.cuts).toEqual([{ start: 3, end: 6 }]);
     expect(editor.cutSuggestionList).toEqual([]);
-    expect(editor.displayKeptDuration).toBe(7);
+    expect(editor.displayKeptDuration).toBe(10);
   });
 
   it("dismissing a suggestion stops suggesting it without removing anything", () => {
@@ -407,7 +408,7 @@ describe("cut suggestion review", () => {
     }
 
     // Detection replaced only the track it ran on.
-    expect(editor.tracks[0].rawMarkers).toEqual([{ start: 1, end: 10 }]);
+    expect(editor.tracks[0].rawMarkers).toEqual([{ start: 0, end: 10 }]);
     expect(editor.tracks[1].rawMarkers).toEqual([{ start: 3, end: 7 }]);
     expect(editor.cuts).toEqual([{ start: 3, end: 4 }]);
     expect(editor.dismissed).toEqual([{ start: 4, end: 5 }]);
@@ -424,6 +425,7 @@ describe("non-destructive playback", () => {
     mark(editor, first, 1, 2);
     editor.addCut({ start: 4, end: 6 });
 
+    editor.setPreview("edited");
     const plan = buildPlaybackPlan(
       editor.timelineSpans,
       0,
@@ -468,5 +470,137 @@ describe("setTranscript", () => {
     const revisionAfterFirst = editor.revision;
     editor.setTranscript(words, "complete");
     expect(editor.revision).toBe(revisionAfterFirst);
+  });
+});
+
+describe("cleanup review workflow", () => {
+  it("keeps new cut markers on the full timeline until edited preview is requested", () => {
+    const e = twoTrackEditor();
+    e.setSelection(2, 4);
+    e.cutSelection();
+    expect(e.cuts).toEqual([{ start: 2, end: 4 }]);
+    expect(e.displayKeptDuration).toBe(10);
+    e.setPreview("edited");
+    expect(e.displayKeptDuration).toBe(8);
+  });
+  it("silences every explicitly selected lane and no others", () => {
+    const e = twoTrackEditor();
+    e.setSelection(2, 4, e.tracks.map(t => t.id));
+    e.markSelection();
+    expect(e.tracks.map(t => t.rawMarkers)).toEqual([[{start: 2, end: 4}], [{start: 2, end: 4}]]);
+    e.undo();
+    expect(e.tracks.map(t => t.rawMarkers)).toEqual([[], []]);
+  });
+  it("leaves a selection pending even when it overlaps an existing marker", () => {
+    const e = twoTrackEditor();
+    e.activeTrack!.rawMarkers = [{start: 2, end: 4}];
+    e.setSelection(2, 5);
+    e.finishSelectionDrag();
+    expect(e.selectionRange).toEqual({start: 2, end: 5});
+    expect(e.rawMarkers).toEqual([{start: 2, end: 4}]);
+  });
+});
+
+describe("all-track analysis and speech scope", () => {
+  it("runs speech detection sequentially for every track while preserving manual marks", async () => {
+    const e = twoTrackEditor();
+    e.tracks.forEach(t => t.monoSamples.fill(.5));
+    e.tracks[0].rawMarkers = [{start:1,end:2}];
+    let active = 0, peak = 0;
+    const detector = vi.spyOn(vadDetector, "detect").mockImplementation(async () => {
+      active++; peak = Math.max(active,peak);
+      await Promise.resolve();
+      active--;
+      return [{start:0,end:8}];
+    });
+    await e.detectAllTracks();
+    expect(detector).toHaveBeenCalledTimes(2);
+    expect(peak).toBe(1);
+    expect(e.tracks[0].rawMarkers).toContainEqual({start:1,end:2});
+    expect(e.tracks[1].rawMarkers.length).toBeGreaterThan(0);
+    detector.mockRestore();
+  });
+  it("does not attach detection results to a replacement recording", async () => {
+    const e = twoTrackEditor();
+    let complete!: (value: {start:number;end:number}[]) => void;
+    const detector = vi.spyOn(vadDetector, "detect").mockImplementation(() => new Promise(resolve => complete = resolve));
+    const job = e.detectAllTracks();
+    e.loadAudio(buffer(), "new.wav", new Float32Array(160000));
+    complete([]);
+    await job;
+    expect(e.rawMarkers).toEqual([]);
+    expect(detector).toHaveBeenCalledTimes(1);
+    detector.mockRestore();
+  });
+  it("silences selected words only within their owning speaker ranges", () => {
+    const e = twoTrackEditor();
+    const [a,b] = e.tracks;
+    e.selectTranscriptWords([{trackId:a.id,text:"A",start:1,end:2},{trackId:b.id,text:"B",start:3,end:5}]);
+    e.markSelection();
+    expect(a.rawMarkers).toEqual([{start:1,end:2}]);
+    expect(b.rawMarkers).toEqual([{start:3,end:5}]);
+    e.undo();
+    expect(e.selectionTrackIds).toEqual([a.id,b.id]);
+    expect(e.selectionFor(a)).toMatchObject({start:1,end:2});
+    e.cutSelection();
+    expect(e.cuts).toEqual([{start:1,end:5}]);
+    expect(e.displayKeptDuration).toBe(10);
+  });
+});
+
+
+describe("unified marker actions and zoom", () => {
+  it("converts every silence marker into shared cuts as one undoable edit", () => {
+    const e = twoTrackEditor();
+    e.setBufferMs(0, e.tracks[0]);
+    e.setBufferMs(0, e.tracks[1]);
+    mark(e, e.tracks[0], 1, 3);
+    mark(e, e.tracks[1], 2, 4);
+    e.addCut({start: 7, end: 8});
+
+    e.convertAllSilencesToCuts();
+
+    expect(e.cuts).toEqual([{start: 1, end: 4}, {start: 7, end: 8}]);
+    expect(e.tracks.map(track => track.rawMarkers)).toEqual([[], []]);
+    e.undo();
+    expect(e.cuts).toEqual([{start: 7, end: 8}]);
+    expect(e.tracks.map(track => track.rawMarkers)).toEqual([
+      [{start: 1, end: 3}],
+      [{start: 2, end: 4}],
+    ]);
+  });
+
+  it("marks, trims, and undoes either action through the same interface", () => {
+    for (const action of ["silence","cut"] as const) {
+      const e = twoTrackEditor();
+      e.markerAction = action;
+      e.setSelection(2,6);
+      e.markAction();
+      e.setSelection(3,4);
+      e.unmarkAction();
+      expect(action === "cut" ? e.cuts : e.rawMarkers).toEqual([{start:2,end:3},{start:4,end:6}]);
+      e.undo();
+      expect(action === "cut" ? e.cuts : e.rawMarkers).toEqual([{start:2,end:6}]);
+    }
+  });
+  it("drags and merges cut marker boundaries without removing time", () => {
+    const e = twoTrackEditor();
+    e.addCut({start:2,end:4}); e.addCut({start:5,end:7});
+    e.commitEdit(() => { e.moveCut(0,"end",6); e.finishCutDrag(); });
+    expect(e.cuts).toEqual([{start:2,end:7}]);
+    expect(e.displayKeptDuration).toBe(10);
+    e.undo();
+    expect(e.cuts).toHaveLength(2);
+  });
+  it("uses reciprocal zoom steps and clamps to the available timeline", () => {
+    const e = twoTrackEditor();
+    e.zoomView(.8);
+    expect(e.viewDurationSec).toBe(8);
+    expect(e.viewStartSec).toBe(1);
+    e.zoomView(1.25);
+    expect(e.viewDurationSec).toBe(10);
+    expect(e.viewStartSec).toBe(0);
+    e.zoomView(.000001);
+    expect(e.viewDurationSec).toBe(.2);
   });
 });

@@ -70,7 +70,7 @@ export function currentRegionNumber(regions: DisplayedInterval[], playheadSec: n
 
 /**
  * Zoom window (source seconds — caller must be in the "all" view filter,
- * where kept time equals source time) that fits `region` with ~10%
+ * where kept time equals source time) that fits `region` with one region of
  * padding on each side, floored at `MIN_VIEW_SECONDS` and clamped to
  * `[0, totalDurationSec]`.
  */

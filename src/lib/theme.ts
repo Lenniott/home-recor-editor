@@ -4,9 +4,9 @@
  * the surrounding chrome (buttons, sliders, readouts).
  */
 export const theme = {
-  panel: "#241f1a",
-  cream: "#f2e6d0",
-  amber: "#e2a33c",
+  panel: "#1b2028",
+  cream: "#e8edf4",
+  amber: "#8bb8ee",
   /** Fill + hatch stroke for marked (silence) regions — teal, not another shade of black, so they read as a distinct state rather than a dim waveform. */
   markedFill: "rgba(63, 167, 154, 0.30)",
   markedHatch: "rgba(63, 167, 154, 0.65)",

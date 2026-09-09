@@ -8,28 +8,23 @@
 
   /**
    * One lane, drawn for one track. Everything about *where* things sit on
-   * screen (zoom window, cut map, playhead, IN/OUT, selection) is shared
+   * screen (zoom window, cut map, playhead, selection) is shared
    * project state, so two lanes always line up; only the samples and the
    * silence marks are this track's own.
    */
-  let { track }: { track: TrackState } = $props();
+  let { track, amplitudeZoomDb = 0 }: { track: TrackState; amplitudeZoomDb?: number } = $props();
 
   let canvas: HTMLCanvasElement | undefined = $state();
   let width: number = $state(0);
   let height: number = $state(0);
 
   const HIT_RADIUS = 7;
-  const FLAG_SIZE = 9;
   /** Pointer moves less than this many pixels while down still counts as a click (seek), not a drag-select. */
   const CLICK_THRESHOLD_PX = 4;
-  const MIN_VIEW_DURATION_SEC = 0.2;
-  /** exp(deltaY * ZOOM_SENSITIVITY): higher = more zoom per wheel notch. */
-  const ZOOM_SENSITIVITY = 0.008;
   const EPS = 1e-6;
 
   type DragTarget =
-    | { type: "in" }
-    | { type: "out" }
+    | { type: "cut"; index: number; edge: "start" | "end" }
     | { type: "silence"; index: number; edge: "start" | "end" }
     | { type: "select"; anchorSec: number; startX: number; moved: boolean };
 
@@ -97,16 +92,11 @@
     return Math.min(Math.max(value, min), max);
   }
 
-  /**
-   * IN's flag snaps to the far edge of a gutter it falls inside (where
-   * playback would actually resume) and OUT's flag snaps to the near
-   * edge (where the last audible content ends) — that way the flags
-   * always sit where playback truly starts/stops instead of hovering
-   * over hidden audio that's never heard.
-   */
   function hitTest(x: number): DragTarget | null {
-    if (Math.abs(x - sourceTimeToX(editor.inSec, "end")) <= HIT_RADIUS) return { type: "in" };
-    if (Math.abs(x - sourceTimeToX(editor.outSec, "start")) <= HIT_RADIUS) return { type: "out" };
+    if (editor.preview === "original") for (let i = 0; i < editor.cuts.length; i++) {
+      for (const edge of ["start", "end"] as const)
+        if (Math.abs(x - sourceTimeToX(editor.cuts[i][edge], edge)) <= HIT_RADIUS) return {type:"cut",index:i,edge};
+    }
     for (let i = 0; i < track.markers.length; i++) {
       const displayed = track.markers[i].displayed;
       if (!displayed) continue;
@@ -151,6 +141,15 @@
     ctx.stroke();
   }
 
+  function amplitudeToHeight(value: number, halfHeight: number): number {
+    const gain = 10 ** (amplitudeZoomDb / 20);
+    return clamp(Math.abs(value) * gain, 0, 1) * halfHeight;
+  }
+
+  function sampleToY(value: number, centerY: number, halfHeight: number): number {
+    return centerY - Math.sign(value) * amplitudeToHeight(value, halfHeight);
+  }
+
   /** Draws each visible `keep` span's peaks in its own pixel slice; `hidden` spans are left blank here for `drawGutters` to fill in. */
   function drawWaveform(ctx: CanvasRenderingContext2D): void {
     refreshPeaksCache();
@@ -160,7 +159,7 @@
     const viewStart = editor.viewStartSec;
     const viewEnd = editor.viewStartSec + editor.viewDurationSec;
 
-    ctx.fillStyle = theme.amber;
+    ctx.fillStyle = editor.tracks[0]?.id === track.id ? theme.amber : "#75cbbb";
     for (const span of editor.timelineSpans) {
       if (span.kind !== "keep") continue;
       const clippedKeptStart = Math.max(span.keptStart, viewStart);
@@ -179,11 +178,27 @@
       const { min, max } = getPeaks(startSample, endSample, columns);
 
       for (let col = 0; col < columns; col++) {
-        const yTop = centerY - max[col] * halfHeight;
-        const yBottom = centerY - min[col] * halfHeight;
+        const yTop = sampleToY(max[col], centerY, halfHeight);
+        const yBottom = sampleToY(min[col], centerY, halfHeight);
         ctx.fillRect(startX + col, Math.min(yTop, yBottom), 1, Math.max(1, Math.abs(yBottom - yTop)));
       }
     }
+  }
+
+  function drawQuietFloor(ctx: CanvasRenderingContext2D): void {
+    const centerY = height / 2;
+    const offset = amplitudeToHeight(10 ** (track.settings.quietThresholdDb / 20), height / 2 - 6);
+    ctx.save();
+    ctx.strokeStyle = theme.amber;
+    ctx.globalAlpha = .6;
+    ctx.setLineDash([4, 4]);
+    ctx.beginPath();
+    ctx.moveTo(0, centerY - offset + .5);
+    ctx.lineTo(width, centerY - offset + .5);
+    ctx.moveTo(0, centerY + offset + .5);
+    ctx.lineTo(width, centerY + offset + .5);
+    ctx.stroke();
+    ctx.restore();
   }
 
   /**
@@ -241,6 +256,8 @@
       ctx.strokeStyle = theme.cutBorder;
       ctx.lineWidth = 1.5;
       ctx.strokeRect(startX + 0.75, 0.75, Math.max(0, endX - startX - 1.5), height - 1.5);
+      drawTick(ctx, startX);
+      drawTick(ctx, endX);
     }
   }
 
@@ -339,19 +356,12 @@
     }
   }
 
-  function drawOutsideShade(ctx: CanvasRenderingContext2D): void {
-    const inX = sourceTimeToX(editor.inSec, "end");
-    const outX = sourceTimeToX(editor.outSec, "start");
-    ctx.fillStyle = theme.outsideShade;
-    if (inX > 0) ctx.fillRect(0, 0, Math.min(inX, width), height);
-    if (outX < width) ctx.fillRect(Math.max(outX, 0), 0, width - Math.max(outX, 0), height);
-  }
-
   /** The pending drag-to-select range, before Mark/Unmark/Cut is chosen. */
   function drawPendingSelection(ctx: CanvasRenderingContext2D): void {
-    if (editor.selectionStartSec === null || editor.selectionEndSec === null) return;
-    const startX = sourceTimeToX(Math.min(editor.selectionStartSec, editor.selectionEndSec), "start");
-    const endX = sourceTimeToX(Math.max(editor.selectionStartSec, editor.selectionEndSec), "end");
+    const range = editor.cutScopePreview ? editor.selectionRange : editor.selectionFor(track);
+    if (!range) return;
+    const startX = sourceTimeToX(range.start, "start");
+    const endX = sourceTimeToX(range.end, "end");
     if (endX <= startX) return;
 
     ctx.fillStyle = theme.selectionFill;
@@ -359,29 +369,6 @@
     ctx.strokeStyle = theme.selectionBorder;
     ctx.lineWidth = 1.5;
     ctx.strokeRect(startX + 0.75, 0.75, Math.max(0, endX - startX - 1.5), height - 1.5);
-  }
-
-  function drawFlag(ctx: CanvasRenderingContext2D, x: number, color: string, direction: "left" | "right"): void {
-    ctx.strokeStyle = color;
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.moveTo(x, 0);
-    ctx.lineTo(x, height);
-    ctx.stroke();
-
-    ctx.fillStyle = color;
-    ctx.beginPath();
-    if (direction === "right") {
-      ctx.moveTo(x, 0);
-      ctx.lineTo(x + FLAG_SIZE, FLAG_SIZE * 0.6);
-      ctx.lineTo(x, FLAG_SIZE * 1.2);
-    } else {
-      ctx.moveTo(x, 0);
-      ctx.lineTo(x - FLAG_SIZE, FLAG_SIZE * 0.6);
-      ctx.lineTo(x, FLAG_SIZE * 1.2);
-    }
-    ctx.closePath();
-    ctx.fill();
   }
 
   function drawPlayhead(ctx: CanvasRenderingContext2D): void {
@@ -411,13 +398,11 @@
 
     drawGrid(ctx);
     drawWaveform(ctx);
+    drawQuietFloor(ctx);
     drawGutters(ctx);
     drawCuts(ctx);
     drawMarkers(ctx);
-    drawOutsideShade(ctx);
     drawPendingSelection(ctx);
-    drawFlag(ctx, sourceTimeToX(editor.inSec, "end"), theme.in, "right");
-    drawFlag(ctx, sourceTimeToX(editor.outSec, "start"), theme.out, "left");
     drawPlayhead(ctx);
   }
 
@@ -440,6 +425,8 @@
     // without touching the canvas bitmap itself.
     track.monoSamples;
     track.markers;
+    track.settings.quietThresholdDb;
+    amplitudeZoomDb;
     editor.viewStartSec;
     editor.viewDurationSec;
     editor.viewFilter;
@@ -447,8 +434,10 @@
     editor.timelineSpans;
     editor.cuts;
     editor.playheadSec;
-    editor.inSec;
-    editor.outSec;
+    editor.cuts;
+    editor.selectionRanges;
+    editor.cutScopePreview;
+    editor.selectionTrackIds;
     editor.selectionStartSec;
     editor.selectionEndSec;
 
@@ -469,14 +458,21 @@
 
   function onPointerMove(e: PointerEvent): void {
     if (!drag || !track.hasAudio) return;
-    if (drag.type === "in") editor.setIn(xToSourceTime(e.offsetX));
-    else if (drag.type === "out") editor.setOut(xToSourceTime(e.offsetX));
+    if (drag.type === "cut") {
+      editor.moveCut(drag.index, drag.edge, xToSourceTime(e.offsetX));
+    }
     else if (drag.type === "silence") {
       editor.moveMarker(track, drag.index, drag.edge, resolveSilenceDragSourceSec(drag.index, e.offsetX));
     } else {
       const t = xToSourceTime(e.offsetX);
       if (!drag.moved && Math.abs(e.offsetX - drag.startX) > CLICK_THRESHOLD_PX) drag.moved = true;
-      if (drag.moved) editor.setSelection(drag.anchorSec, t);
+      if (drag.moved) {
+        const lanes = Array.from(document.querySelectorAll<HTMLElement>("[data-track-lane]"));
+        const origin = lanes.findIndex(lane => lane.dataset.trackLane === track.id);
+        const target = lanes.findIndex(lane => { const box = lane.getBoundingClientRect(); return e.clientY >= box.top && e.clientY <= box.bottom; });
+        const ids = target < 0 ? [track.id] : lanes.slice(Math.min(origin, target), Math.max(origin, target) + 1).map(lane => lane.dataset.trackLane!);
+        editor.setSelection(drag.anchorSec, t, ids);
+      }
     }
   }
 
@@ -488,13 +484,25 @@
         // there and drop any previously pending selection instead of
         // leaving a zero-width one behind.
         player.seek(drag.anchorSec);
-        editor.clearSelection();
+        const at = drag.anchorSec;
+        const cut = editor.cuts.find(r => r.start <= at && r.end > at);
+        const silence = track.rawMarkers.find(r => r.start <= at && r.end > at);
+        if (cut) {
+          editor.markerAction = "cut";
+          editor.setSelection(cut.start,cut.end,editor.tracks.map(t => t.id));
+        } else if (silence) {
+          editor.markerAction = "silence";
+          editor.setSelection(silence.start,silence.end,[track.id]);
+        } else editor.clearSelection();
       } else {
         // A real drag: auto-merge into an existing marked region if the
         // overlap is substantial, otherwise leave it pending for Mark/Unmark/Cut.
         editor.finishSelectionDrag(track);
         player.refreshIfPlaying();
       }
+    } else if (drag.type === "cut") {
+      editor.finishCutDrag();
+      player.refreshIfPlaying();
     } else if (drag.type === "silence") {
       // Merge check happens only here, once, rather than on every
       // pointermove — see finishMarkerDrag for why.
@@ -507,73 +515,6 @@
     // playhead position) is dropped as a no-op inside `endEdit`.
     editor.endEdit();
   }
-
-  // Wheel events can fire faster than the display refreshes; batching them
-  // into one setView per animation frame keeps a fast zoom/pan flick from
-  // queuing up redundant state writes (and redraws) behind each other.
-  let rafId: number | null = null;
-  let wheelIsZoom = false;
-  let wheelZoomFactor = 1;
-  let wheelAnchorX = 0;
-  let wheelPanDeltaSec = 0;
-
-  /** A zoom/pan flick is a burst of many wheel events, not one — the undo transaction stays open until the burst goes quiet for this long. */
-  const WHEEL_IDLE_MS = 300;
-  let wheelIdleTimeout: ReturnType<typeof setTimeout> | null = null;
-
-  function flushWheel(): void {
-    if (wheelIsZoom) {
-      const anchorKept = layout.xToKept(wheelAnchorX);
-      const newDuration = clamp(editor.viewDurationSec * wheelZoomFactor, MIN_VIEW_DURATION_SEC, editor.displayKeptDuration || 1);
-      const ratio = width > 0 ? wheelAnchorX / width : 0.5;
-      editor.setView(anchorKept - ratio * newDuration, newDuration);
-      wheelZoomFactor = 1;
-    } else {
-      editor.setView(editor.viewStartSec + wheelPanDeltaSec, editor.viewDurationSec);
-      wheelPanDeltaSec = 0;
-    }
-  }
-
-  function scheduleWheelFlush(): void {
-    if (rafId !== null) return;
-    rafId = requestAnimationFrame(() => {
-      rafId = null;
-      flushWheel();
-    });
-  }
-
-  function onWheel(e: WheelEvent): void {
-    if (!track.hasAudio) return;
-    e.preventDefault();
-
-    // First event of a burst opens the transaction; every later event in
-    // the same burst just pushes the idle deadline back, so a long flick
-    // still becomes one undo step instead of one per animation frame.
-    if (wheelIdleTimeout === null) editor.beginEdit();
-    else clearTimeout(wheelIdleTimeout);
-    wheelIdleTimeout = setTimeout(() => {
-      wheelIdleTimeout = null;
-      editor.endEdit();
-    }, WHEEL_IDLE_MS);
-
-    const isZoom = e.ctrlKey || e.metaKey;
-    if (isZoom !== wheelIsZoom && rafId !== null) {
-      // Mode changed mid-batch (e.g. user let go of Ctrl): flush the
-      // pending zoom/pan before starting to accumulate the other kind.
-      cancelAnimationFrame(rafId);
-      rafId = null;
-      flushWheel();
-    }
-    wheelIsZoom = isZoom;
-
-    if (isZoom) {
-      wheelAnchorX = e.offsetX;
-      wheelZoomFactor *= Math.exp(e.deltaY * ZOOM_SENSITIVITY);
-    } else {
-      wheelPanDeltaSec += (e.deltaX || e.deltaY) * (editor.viewDurationSec / Math.max(1, width));
-    }
-    scheduleWheelFlush();
-  }
 </script>
 
 <div class="waveform" class:active={isActive} bind:clientWidth={width} bind:clientHeight={height}>
@@ -585,7 +526,6 @@
       onpointermove={onPointerMove}
       onpointerup={onPointerUp}
       onpointercancel={onPointerUp}
-      onwheel={onWheel}
     ></canvas>
   {:else}
     <div class="empty">

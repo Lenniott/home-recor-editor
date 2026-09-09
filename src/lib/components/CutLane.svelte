@@ -1,7 +1,9 @@
 <script lang="ts">
   import { editor, type Range } from "../editor.svelte";
   import { player } from "../player";
+  import { keptToSource } from "../audio/timelineMap";
   import { laneLayout } from "../audio/laneLayout";
+  import IconCaret from "./icons/IconCaret.svelte";
 
   /**
    * The shared cut lane: one strip aligned with the waveform lanes above
@@ -13,8 +15,39 @@
    * the same seconds from every lane at once, which is what keeps two
    * synced recordings synced.
    */
+  let { reviewOnly = false, stripOnly = false }: { reviewOnly?: boolean; stripOnly?: boolean } = $props();
   let width: number = $state(0);
   let index: number = $state(0);
+  let edgeDrag: {index:number;edge:"start"|"end"} | null = null;
+  function startEdge(event: PointerEvent): void {
+    if (editor.preview !== "original") return;
+    const target = (event.target as HTMLElement).closest<HTMLElement>("[data-cut-index]");
+    if (!target) return;
+    const box = target.getBoundingClientRect();
+    const edge = Math.abs(event.clientX-box.left) < 8 ? "start" : Math.abs(event.clientX-box.right) < 8 ? "end" : null;
+    if (!edge) return;
+    edgeDrag = {index:Number(target.dataset.cutIndex),edge};
+    editor.beginEdit();
+    (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
+    event.preventDefault();
+  }
+  function moveEdge(event: PointerEvent): void {
+    if (!edgeDrag) return;
+    const x = event.clientX-(event.currentTarget as HTMLElement).getBoundingClientRect().left;
+    editor.moveCut(edgeDrag.index,edgeDrag.edge,keptToSource(editor.timelineSpans,layout.xToKept(x)));
+  }
+  function endEdge(): void {
+    if (!edgeDrag) return;
+    editor.finishCutDrag();
+    edgeDrag = null;
+    editor.endEdit();
+    player.refreshIfPlaying();
+  }
+  function selectCut(range: Range): void {
+    editor.markerAction = "cut";
+    editor.setSelection(range.start,range.end,editor.tracks.map(t => t.id));
+    editor.cutScopePreview = true;
+  }
 
   const suggestions = $derived(editor.cutSuggestionList);
   // Suggestions are recomputed from detection, so the list shifts under the
@@ -70,23 +103,25 @@
   }
 </script>
 
-<div class="cut-lane">
+<div class="cut-lane" class:review-only={reviewOnly}>
+  {#if !reviewOnly}
   <div class="lane-label">
     <span class="name">Shared cuts</span>
     <span class="meta">{editor.cuts.length} cut{editor.cuts.length === 1 ? "" : "s"}</span>
   </div>
 
-  <div class="strip" bind:clientWidth={width} aria-label="Shared cut lane">
-    {#each editor.cuts as cut (`${cut.start}-${cut.end}`)}
+  <div class="strip" bind:clientWidth={width} aria-label="Shared cut lane" role="group" onpointerdown={startEdge} onpointermove={moveEdge} onpointerup={endEdge} onpointercancel={endEdge}>
+    {#each editor.cuts as cut, cutIndex}
       {@const box = band(cut)}
       {#if box}
         <button
           type="button"
           class="mark cut"
+          data-cut-index={cutIndex}
           style="left:{box.left}px;width:{box.width}px"
-          title="Cut {formatTime(cut.start)}–{formatTime(cut.end)} — click to put it back"
-          onclick={() => restore(cut)}
-          aria-label="Restore cut at {formatTime(cut.start)}"
+          title="Cut {formatTime(cut.start)}–{formatTime(cut.end)} — select to edit, drag either edge"
+          onclick={() => selectCut(cut)}
+          aria-label="Select cut at {formatTime(cut.start)}"
         ></button>
       {/if}
     {/each}
@@ -106,24 +141,33 @@
     {/each}
   </div>
 
+  {/if}
+  {#if !stripOnly}
   <div class="review">
     <span class="label">Suggestions</span>
-    <button type="button" onclick={() => step(-1)} disabled={suggestions.length === 0} aria-label="Previous suggestion">◀</button>
+    <button type="button" class="icon-btn" onclick={() => step(-1)} disabled={suggestions.length === 0} aria-label="Previous suggestion">
+      <IconCaret dir="left" />
+    </button>
     <span class="readout">
       {suggestions.length === 0 ? "0 / 0" : `${Math.min(index, suggestions.length - 1) + 1} / ${suggestions.length}`}
     </span>
-    <button type="button" onclick={() => step(1)} disabled={suggestions.length === 0} aria-label="Next suggestion">▶</button>
+    <button type="button" class="icon-btn" onclick={() => step(1)} disabled={suggestions.length === 0} aria-label="Next suggestion">
+      <IconCaret dir="right" />
+    </button>
     {#if current}
       <span class="range">{formatTime(current.start)}&ndash;{formatTime(current.end)}</span>
       <button type="button" onclick={() => audition(current)}>Audition</button>
-      <button type="button" class="accept" onclick={() => accept(current)}>Accept cut</button>
+      <button type="button" class="accept" onclick={() => accept(current)}>Mark cut</button>
       <button type="button" class="dismiss" onclick={() => dismiss(current)}>Dismiss</button>
     {/if}
-    <button type="button" onclick={acceptAll} disabled={suggestions.length === 0}>Accept all</button>
+    <button type="button" onclick={acceptAll} disabled={suggestions.length === 0}>Mark all suggestions</button>
   </div>
+  {/if}
 </div>
 
 <style>
+  .cut-lane.review-only { display: block; }
+  .review-only .review { gap: .5rem; }
   .cut-lane {
     display: grid;
     grid-template-columns: var(--lane-label-width) 1fr;
@@ -213,6 +257,13 @@
     font-size: 0.72rem;
     padding: 0.25rem 0.55rem;
     white-space: nowrap;
+  }
+
+  .review .icon-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0.25rem;
   }
 
   .review .accept {

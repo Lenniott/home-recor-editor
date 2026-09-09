@@ -8,7 +8,7 @@ import TranscriptPanel from "./TranscriptPanel.svelte";
 
 vi.mock("../player", () => ({ player: { refreshIfPlaying: vi.fn(), seek: vi.fn() } }));
 // Exposed via vi.hoisted so tests can spy on its prototype (see "project-provided transcript" below).
-const TranscriptionMock = vi.hoisted(() => class {
+const TranscriptionMock = vi.hoisted(() => class MockTranscription {
   words = [
     { text: "Hello,", start: 1, end: 1.5 },
     { text: "world!", start: 1.6, end: 2.2 },
@@ -16,6 +16,11 @@ const TranscriptionMock = vi.hoisted(() => class {
   ];
   modelChecked = true; modelReady = true; connected = true; busy = false;
   error = null; completed = true; invalidated = false;
+  static latest: MockTranscription;
+  constructor() { TranscriptionMock.latest = this; }
+  onSettled: ((words: {text:string;start:number;end:number}[] | null) => void) | null = null;
+  transcribe = vi.fn();
+  cancel() { this.onSettled?.(null); }
   init() {} dispose() {} setAudio() {}
   restore(words: { text: string; start: number; end: number }[], completed: boolean) { this.words = words; this.completed = completed; }
 });
@@ -36,9 +41,10 @@ beforeEach(() => {
   vi.mocked(player.refreshIfPlaying).mockClear();
   HTMLElement.prototype.scrollIntoView = vi.fn();
   editor.loadAudio({ duration: 10, sampleRate: 16000 } as AudioBuffer, "test.wav", new Float32Array(160000));
+  editor.setTranscript(new TranscriptionMock().words, "complete");
   target = document.createElement("div"); document.body.append(target);
   component = mount(TranscriptPanel, { target }); flushSync();
-  button("Edit by text").click(); flushSync();
+
 });
 afterEach(async () => { window.getSelection()?.removeAllRanges(); await unmount(component); target.remove(); });
 
@@ -220,8 +226,58 @@ describe("project-provided transcript", () => {
     target = document.createElement("div"); document.body.append(target);
     component = mount(TranscriptPanel, { target }); flushSync();
 
-    expect(restoreSpy).toHaveBeenCalledWith(editor.transcriptWords, true);
+    expect(restoreSpy).not.toHaveBeenCalled();
+    expect(target.querySelector("[data-word]")?.textContent).toBe("Restored");
     expect(editor.transcriptWords).toEqual(restoredWords);
     restoreSpy.mockRestore();
+  });
+});
+
+describe("conversation transcript", () => {
+  it("shows both speakers, seeks the owning lane and highlights overlapping speech", () => {
+    editor.addTrack({duration:10,sampleRate:16000} as AudioBuffer, "guest.wav", new Float32Array(160000));
+    editor.setTranscript([{text:"Guest", start:1.2,end:2}], "complete");
+    flushSync();
+    expect(target.querySelectorAll("[data-word]")).toHaveLength(4);
+    editor.setPlayhead(1.3); flushSync();
+    expect(target.querySelectorAll('[aria-current="true"]')).toHaveLength(2);
+    pointer(target.querySelector('[data-word="1"]')!);
+    expect(editor.activeTrackId).toBe(editor.tracks[1].id);
+    expect(editor.selectionTrackIds).toEqual([editor.tracks[1].id]);
+    expect(editor.playheadSec).toBe(1.2);
+  });
+  it("runs every track in order and stores results on the job owner despite lane changes", () => {
+    editor.addTrack({duration:10,sampleRate:16000} as AudioBuffer, "guest.wav", new Float32Array(160000));
+    flushSync();
+    button("Transcribe all").click(); flushSync();
+    const runner = TranscriptionMock.latest;
+    expect(runner.transcribe).toHaveBeenCalledTimes(1);
+    editor.setActiveTrack(editor.tracks[1].id);
+    runner.onSettled?.([{text:"Host",start:0,end:1}]); flushSync();
+    expect(editor.tracks[0].transcriptWords[0].text).toBe("Host");
+    expect(runner.transcribe).toHaveBeenCalledTimes(2);
+    runner.onSettled?.([{text:"Guest",start:1,end:2}]); flushSync();
+    expect(editor.tracks[1].transcriptWords[0].text).toBe("Guest");
+    expect(target.textContent).toContain("Host");
+    expect(target.textContent).toContain("Guest");
+    const saved = editor.toProjectV2("/tmp/test.hre.json");
+    expect(saved.tracks.map(t => t.transcript.status)).toEqual(["complete","complete"]);
+  });
+  it("discards stale results after the recording is replaced", () => {
+    button("Transcribe all").click(); flushSync();
+    const runner = TranscriptionMock.latest;
+    editor.loadAudio({duration:5,sampleRate:16000} as AudioBuffer, "new.wav", new Float32Array(80000));
+    runner.onSettled?.([{text:"Stale",start:0,end:1}]); flushSync();
+    expect(editor.transcriptWords).toEqual([]);
+  });
+});
+
+describe("transcript silence gap", () => {
+  it("updates paragraph breaks when the owning track's silence gap changes", () => {
+    expect(target.querySelectorAll(".words p")).toHaveLength(2);
+    editor.setMinSilenceMs(2000); flushSync();
+    expect(target.querySelectorAll(".words p")).toHaveLength(1);
+    editor.setMinSilenceMs(500); flushSync();
+    expect(target.querySelectorAll(".words p")).toHaveLength(2);
   });
 });

@@ -76,27 +76,27 @@ describe("currentRegionNumber", () => {
 });
 
 describe("fitWindow", () => {
-  it("pads 10% on each side", () => {
+  it("includes one region of context on each side", () => {
     const { startSec, durationSec } = fitWindow({ start: 20, end: 25 }, 100);
-    expect(startSec).toBeCloseTo(19.5);
-    expect(durationSec).toBeCloseTo(6);
+    expect(startSec).toBeCloseTo(15);
+    expect(durationSec).toBeCloseTo(15);
   });
 
-  it("floors very short regions at the 0.2s minimum", () => {
+  it("floors very short regions at the 4s minimum", () => {
     const { durationSec } = fitWindow({ start: 20, end: 20.02 }, 100);
-    expect(durationSec).toBe(0.2);
+    expect(durationSec).toBe(4);
   });
 
   it("clamps padding to the start of the file", () => {
     const { startSec, durationSec } = fitWindow({ start: 0, end: 1 }, 100);
     expect(startSec).toBe(0);
-    expect(durationSec).toBeCloseTo(1.1);
+    expect(durationSec).toBeCloseTo(4);
   });
 
   it("clamps padding to the end of the file", () => {
     const { startSec, durationSec } = fitWindow({ start: 99, end: 99.5 }, 99.5);
-    expect(startSec).toBeCloseTo(98.95);
-    expect(durationSec).toBeCloseTo(0.55);
+    expect(startSec).toBeCloseTo(95.5);
+    expect(durationSec).toBeCloseTo(4);
   });
 
   it("never returns a window wider than the file itself", () => {

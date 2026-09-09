@@ -4,16 +4,43 @@
   import { renderEdited } from "$lib/audio/applyEdits";
   import { decodeAudioFile, mixToMono } from "$lib/audio/decode";
   import { encodeWav } from "$lib/audio/encodeWav";
-  import { alignRenders, combineRenders, frameCount, renderForExport } from "$lib/audio/exportMix";
-  import { editor } from "$lib/editor.svelte";
-  import { joinPath, mixFileName, projectStem, separateTrackFileNames } from "$lib/exportNames";
+  import {
+    alignRenders,
+    combineRenders,
+    frameCount,
+    padToFrames,
+    renderForExport,
+  } from "$lib/audio/exportMix";
+  import { editor, MAX_TRACKS } from "$lib/editor.svelte";
+  import {
+    joinPath,
+    mixFileName,
+    projectStem,
+    separateTrackFileNames,
+  } from "$lib/exportNames";
   import { sha256Hex } from "$lib/hash";
   import { player } from "$lib/player";
   import { parseProjectFile, sidecarPath } from "$lib/projectFile";
-  import { parsePodcastProject, resolveSourcePath, serializePodcastProject, type PodcastProject } from "$lib/projectV2";
+  import {
+    parsePodcastProject,
+    resolveSourcePath,
+    serializePodcastProject,
+    type PodcastProject,
+  } from "$lib/projectV2";
   import { vadDetector } from "$lib/vadDetector";
+  import FileMenu, { type ExportChoice } from "$lib/components/FileMenu.svelte";
+  import IconChevron from "$lib/components/icons/IconChevron.svelte";
+  import IconRedo from "$lib/components/icons/IconRedo.svelte";
+  import IconUndo from "$lib/components/icons/IconUndo.svelte";
+  import SelectionActions from "$lib/components/SelectionActions.svelte";
+  import TimelineStack from "$lib/components/TimelineStack.svelte";
+  let tab = $state("transcript");
+  let paneOpen = $state(true);
+  let windowWidth = $state(1180);
+  $effect(() => {
+    if (windowWidth < 900) paneOpen = false;
+  });
   import CutLane from "$lib/components/CutLane.svelte";
-  import TrackLane from "$lib/components/TrackLane.svelte";
   import SilenceControls from "$lib/components/SilenceControls.svelte";
   import TranscriptPanel from "$lib/components/TranscriptPanel.svelte";
   import Transport from "$lib/components/Transport.svelte";
@@ -22,7 +49,12 @@
   // Detect click — see vadDetector.warmUp() for why that timing matters.
   vadDetector.warmUp();
 
-  const AUDIO_FILTER = [{ name: "Audio", extensions: ["wav", "mp3", "m4a", "aac", "flac", "ogg", "aiff"] }];
+  const AUDIO_FILTER = [
+    {
+      name: "Audio",
+      extensions: ["wav", "mp3", "m4a", "aac", "flac", "ogg", "aiff"],
+    },
+  ];
   const PROJECT_FILTER = [{ name: "Recor Project", extensions: ["json"] }];
   /** Debounce so a run of quick edits (a drag, a settings slider) writes once, not on every intermediate tick. */
   const AUTOSAVE_DELAY_MS = 1500;
@@ -38,14 +70,21 @@
   let isLoading = $state(false);
   let loadError: string | null = $state(null);
   let isSaving = $state(false);
+  let blockedSavePath: string | null = null;
   let saveError: string | null = $state(null);
   let isExporting = $state(false);
+  let exportProgress = $state(0);
+  let exportStage = $state("");
   let exportError: string | null = $state(null);
   let exportStatus: string | null = $state(null);
   let exportStatusTimeout: ReturnType<typeof setTimeout> | undefined;
   let autosaveTimer: ReturnType<typeof setTimeout> | undefined;
 
-  const showCutLane = $derived(editor.tracks.length > 1 || editor.cuts.length > 0 || editor.cutSuggestionList.length > 0);
+  const showCutLane = $derived(
+    editor.tracks.length > 1 ||
+      editor.cuts.length > 0 ||
+      editor.cutSuggestionList.length > 0,
+  );
 
   /**
    * Read, hash, and decode a recording in that order: `decodeAudioFile`
@@ -56,65 +95,101 @@
     // The command returns a raw ipc::Response, which invoke() surfaces as an
     // ArrayBuffer. Falls back to a plain number array on platforms where that
     // isn't supported, matching how @tauri-apps/plugin-fs handles the same case.
-    const raw = await invoke<ArrayBuffer | number[]>("read_audio_file", { path });
-    const bytes = raw instanceof ArrayBuffer ? new Uint8Array(raw) : Uint8Array.from(raw);
+    const raw = await invoke<ArrayBuffer | number[]>("read_audio_file", {
+      path,
+    });
+    const bytes =
+      raw instanceof ArrayBuffer ? new Uint8Array(raw) : Uint8Array.from(raw);
     const sha256 = await sha256Hex(bytes);
     const buffer = await decodeAudioFile(bytes, player.getContext());
-    return { buffer, mono: mixToMono(buffer), sha256, path, name: path.split(/[\\/]/).pop() ?? path };
+    return {
+      buffer,
+      mono: mixToMono(buffer),
+      sha256,
+      path,
+      name: path.split(/[\\/]/).pop() ?? path,
+    };
   }
 
   async function pickAudio(title?: string): Promise<string | null> {
-    const selected = await open({ multiple: false, title, filters: AUDIO_FILTER });
+    const selected = await open({
+      multiple: false,
+      title,
+      filters: AUDIO_FILTER,
+    });
     return selected && !Array.isArray(selected) ? selected : null;
   }
 
-  /** Open a recording as a new single-track project, restoring its saved project if there is one. */
-  async function openRecording(): Promise<void> {
-    loadError = null;
-
-    let selected: string | null;
-    try {
-      selected = await pickAudio();
-    } catch (err) {
-      loadError = describeError(err);
-      return;
-    }
-    if (!selected) return;
-
-    isLoading = true;
-    saveError = null;
-    try {
-      const loaded = await readAndHashAudio(selected);
-      editor.loadAudio(loaded.buffer, loaded.name, loaded.mono, loaded.path, loaded.sha256);
-      await loadProjectIfPresent(loaded);
-    } catch (err) {
-      loadError = describeError(err);
-    } finally {
-      isLoading = false;
-    }
+  async function pickAudioFiles(): Promise<string[] | null> {
+    const selected = await open({
+      multiple: true,
+      title: "Import recordings (one or two synced tracks)",
+      filters: AUDIO_FILTER,
+    });
+    if (!selected) return null;
+    return Array.isArray(selected) ? selected : [selected];
   }
 
   /**
-   * Add a second, already-synced recording as its own lane. Same start
-   * time is assumed (no alignment UI); a different length is fine — the
-   * shorter track's missing tail simply counts as silence.
+   * Import one or two already-synced recordings. One file on an empty
+   * project also restores a sidecar if one sits next to it. One extra
+   * file on a single-track project adds the second lane; anything else
+   * starts a new session from the chosen files.
    */
-  async function addTrack(): Promise<void> {
+  async function importRecordings(): Promise<void> {
     loadError = null;
-    let selected: string | null;
+    let selected: string[] | null;
     try {
-      selected = await pickAudio("Open second track");
+      selected = await pickAudioFiles();
     } catch (err) {
       loadError = describeError(err);
       return;
     }
-    if (!selected) return;
+    if (!selected || selected.length === 0) return;
+    const paths = [...new Set(selected)];
+    if (paths.length > MAX_TRACKS) {
+      loadError = `Import at most ${MAX_TRACKS} recordings.`;
+      return;
+    }
 
+    const addSecond = editor.canAddTrack && paths.length === 1;
     isLoading = true;
+    if (!addSecond) {
+      blockedSavePath = null;
+      saveError = null;
+    }
     try {
-      const loaded = await readAndHashAudio(selected);
+      const loaded = await Promise.all(
+        paths.map((path) => readAndHashAudio(path)),
+      );
       player.pause();
-      editor.addTrack(loaded.buffer, loaded.name, loaded.mono, loaded.path, loaded.sha256);
+      if (addSecond) {
+        editor.addTrack(
+          loaded[0].buffer,
+          loaded[0].name,
+          loaded[0].mono,
+          loaded[0].path,
+          loaded[0].sha256,
+        );
+        return;
+      }
+      const [first, second] = loaded;
+      editor.loadAudio(
+        first.buffer,
+        first.name,
+        first.mono,
+        first.path,
+        first.sha256,
+      );
+      if (second)
+        editor.addTrack(
+          second.buffer,
+          second.name,
+          second.mono,
+          second.path,
+          second.sha256,
+        );
+      else await loadProjectIfPresent(first);
     } catch (err) {
       loadError = describeError(err);
     } finally {
@@ -133,8 +208,11 @@
     try {
       const text = await invoke<string | null>("read_text_file", { path });
       if (text) await applyProjectText(text, path, loaded);
-    } catch {
-      // Sidecar read failed (permissions, corrupt file, etc.) — keep going with empty marks.
+    } catch (error) {
+      blockedSavePath = path;
+      loadError =
+        describeError(error) +
+        " The saved project is protected; use Save As for a new project.";
     }
   }
 
@@ -145,14 +223,23 @@
    * freshly-loaded (empty) marks in place if neither format parses — a
    * corrupt sidecar should never block opening the audio itself.
    */
-  async function applyProjectText(text: string, path: string, preloaded: LoadedAudio): Promise<void> {
+  async function applyProjectText(
+    text: string,
+    path: string,
+    preloaded: LoadedAudio,
+  ): Promise<void> {
     let project: PodcastProject;
     try {
       project = parsePodcastProject(text);
     } catch {
       // Not a valid version-2 project — fall through to the legacy format.
       const legacy = parseProjectFile(text);
-      if (legacy) editor.applyLegacyProject(legacy, path);
+      if (!legacy) throw new Error("The saved project could not be read.");
+      if (Math.abs(legacy.durationSec - preloaded.buffer.duration) > 0.01)
+        throw new Error(
+          "The legacy project duration differs from this recording. Locate the original audio before reusing its marks.",
+        );
+      editor.applyLegacyProject(legacy, path);
       return;
     }
     await openParsedProject(project, path, preloaded, false);
@@ -188,32 +275,48 @@
         if (!allowRelink) {
           // Nothing to prompt with (this project came along for the ride
           // with an audio file the user opened): keep whatever loaded.
-          if (index === 0) throw err;
-          break;
+          throw new Error(
+            "A source is missing. Use Open Project to relink all recordings before saving.",
+          );
         }
       }
       // Moved or renamed since the project was saved — ask where it went.
       const relocated = await pickAudio(`Locate "${track.source.name}"`);
-      if (!relocated) {
-        if (index === 0) return;
-        break;
-      }
+      if (!relocated) return;
       loaded.push(await readAndHashAudio(relocated));
     }
     if (loaded.length === 0) return;
 
-    const [first, ...rest] = loaded;
-    editor.loadAudio(first.buffer, first.name, first.mono, first.path, first.sha256);
-    for (const track of rest) editor.addTrack(track.buffer, track.name, track.mono, track.path, track.sha256);
-    editor.applyProjectV2(project, projectPath);
-
-    if (loaded.length < project.tracks.length) {
-      // Say so loudly: the project is open but incomplete, and saving it
-      // from here (autosave included) writes it back without the track
-      // whose recording couldn't be found.
-      const missing = project.tracks[loaded.length];
-      loadError = `Couldn't open "${missing.source.name}" — the project is loaded without it. Use Open Project… to relink before saving, or that track's marks and transcript will be dropped on the next save.`;
+    for (let i = 0; i < loaded.length; i++) {
+      if (
+        loaded[i].sha256 !== project.tracks[i].source.sha256 ||
+        Math.abs(
+          loaded[i].buffer.duration - project.tracks[i].source.duration,
+        ) > 0.01
+      )
+        throw new Error(
+          'Source "' +
+            project.tracks[i].speaker +
+            '" differs from the saved recording. Relink the original source to preserve its timings. The current project has not been replaced.',
+        );
     }
+    const [first, ...rest] = loaded;
+    editor.loadAudio(
+      first.buffer,
+      first.name,
+      first.mono,
+      first.path,
+      first.sha256,
+    );
+    for (const track of rest)
+      editor.addTrack(
+        track.buffer,
+        track.name,
+        track.mono,
+        track.path,
+        track.sha256,
+      );
+    editor.applyProjectV2(project, projectPath);
   }
 
   /**
@@ -238,7 +341,9 @@
 
     isLoading = true;
     try {
-      const text = await invoke<string | null>("read_text_file", { path: selected });
+      const text = await invoke<string | null>("read_text_file", {
+        path: selected,
+      });
       if (!text) throw new Error("Project file not found.");
       let project: PodcastProject;
       try {
@@ -264,15 +369,24 @@
    */
   async function saveProject(destination?: string): Promise<void> {
     if (!editor.filePath || isSaving) return;
-    const path = destination ?? editor.projectPath ?? sidecarPath(editor.filePath);
+    const path =
+      destination ?? editor.projectPath ?? sidecarPath(editor.filePath);
+    if (path === blockedSavePath) {
+      saveError =
+        "This project could not be restored. Use Save As to preserve the existing file.";
+      return;
+    }
+    const owner = editor.tracks[0];
     isSaving = true;
     saveError = null;
     const revision = editor.revision;
     try {
       const contents = serializePodcastProject(editor.toProjectV2(path));
       await invoke("write_text_file", { path, contents });
-      editor.projectPath = path;
-      editor.markSaved(revision);
+      if (editor.tracks[0] === owner) {
+        editor.projectPath = path;
+        editor.markSaved(revision);
+      }
     } catch (err) {
       saveError = describeError(err);
     } finally {
@@ -286,7 +400,10 @@
     const stem = (editor.fileName ?? "project").replace(/\.[^./\\]+$/, "");
     let destination: string | null;
     try {
-      destination = await save({ defaultPath: `${stem}.hre.json`, filters: PROJECT_FILTER });
+      destination = await save({
+        defaultPath: `${stem}.hre.json`,
+        filters: PROJECT_FILTER,
+      });
     } catch (err) {
       saveError = describeError(err);
       return;
@@ -301,17 +418,24 @@
   // change, including right after a save completes (which is what stops
   // the loop once there's nothing left to write).
   $effect(() => {
+    const revision = editor.revision;
+    const saving = isSaving;
+    const failed = saveError;
+    const loading = isLoading;
     const dirty = editor.dirty;
     const path = editor.projectPath;
     clearTimeout(autosaveTimer);
-    if (dirty && path) autosaveTimer = setTimeout(() => void saveProject(), AUTOSAVE_DELAY_MS);
+    if (dirty && path && !saving && !failed && !loading)
+      autosaveTimer = setTimeout(() => void saveProject(), AUTOSAVE_DELAY_MS);
   });
 
   /** What one two-track Export action writes: one WAV per track, one combined mix, or both. */
   type ExportMode = "separate" | "mix" | "both";
 
   function trackChannels(buffer: AudioBuffer): Float32Array[] {
-    return Array.from({ length: buffer.numberOfChannels }, (_, i) => buffer.getChannelData(i));
+    return Array.from({ length: buffer.numberOfChannels }, (_, i) =>
+      buffer.getChannelData(i),
+    );
   }
 
   /**
@@ -324,10 +448,36 @@
    * export's path can hold anything (a speaker's name, an accented
    * folder), so it's percent-encoded here and decoded Rust-side.
    */
-  async function writeWav(path: string, channels: Float32Array[], sampleRate: number): Promise<void> {
+  async function writeWav(
+    path: string,
+    channels: Float32Array[],
+    sampleRate: number,
+  ): Promise<void> {
     await invoke("write_audio_file", encodeWav(channels, sampleRate), {
       headers: { path: encodeURIComponent(path) },
     });
+  }
+
+  async function showExportProgress(
+    progress: number,
+    stage: string,
+  ): Promise<void> {
+    exportProgress = Math.max(0, Math.min(1, progress));
+    exportStage = stage;
+    await new Promise<void>((resolve) =>
+      requestAnimationFrame(() => resolve()),
+    );
+  }
+
+  function startExport(choice: ExportChoice): Promise<void> {
+    return choice === "recording" ? exportRecording() : exportProject(choice);
+  }
+
+  function resetExportUi(): void {
+    if (isExporting) return;
+    exportProgress = 0;
+    exportStage = "";
+    exportError = null;
   }
 
   function flashExported(fileCount: number): void {
@@ -350,6 +500,8 @@
     if (!track || !buffer || isExporting) return;
 
     exportError = null;
+    const muted = track.markedIntervals.map((r) => ({ ...r }));
+    const cuts = editor.cuts.map((r) => ({ ...r }));
     const stem = (track.fileName ?? "export").replace(/\.[^./\\]+$/, "");
     let destination: string | null;
     try {
@@ -366,8 +518,17 @@
     isExporting = true;
     exportStatus = null;
     try {
-      const edited = renderEdited(trackChannels(buffer), buffer.sampleRate, track.markedIntervals, editor.cuts);
+      await showExportProgress(0.08, "Preparing export");
+      await showExportProgress(0.25, "Rendering edits");
+      const edited = renderEdited(
+        trackChannels(buffer),
+        buffer.sampleRate,
+        muted,
+        cuts,
+      );
+      await showExportProgress(0.7, "Encoding and writing WAV");
       await writeWav(destination, edited, buffer.sampleRate);
+      await showExportProgress(1, "Export complete");
       flashExported(1);
     } catch (err) {
       exportError = describeError(err);
@@ -395,15 +556,27 @@
     if (isExporting) return;
     const loaded = editor.tracks.flatMap((track) => {
       const buffer = track.audioBuffer;
-      return buffer ? [{ track, buffer }] : [];
+      return buffer
+        ? [
+            {
+              buffer,
+              speaker: track.speaker,
+              muted: track.markedIntervals.map((r) => ({ ...r })),
+            },
+          ]
+        : [];
     });
     if (loaded.length < 2) return;
+    const cuts = editor.cuts.map((r) => ({ ...r }));
+    const exportStem = projectStem(editor.fileName);
 
     exportError = null;
     // Lining two rates up means resampling, which is out of scope — say so
     // rather than writing files that drift against each other.
     const sampleRate = loaded[0].buffer.sampleRate;
-    const mismatch = loaded.find((entry) => entry.buffer.sampleRate !== sampleRate);
+    const mismatch = loaded.find(
+      (entry) => entry.buffer.sampleRate !== sampleRate,
+    );
     if (mismatch) {
       exportError =
         `The tracks were recorded at different sample rates (${sampleRate} Hz and ${mismatch.buffer.sampleRate} Hz). ` +
@@ -413,7 +586,11 @@
 
     let directory: string | string[] | null;
     try {
-      directory = await open({ directory: true, multiple: false, title: "Choose a folder for the exported files" });
+      directory = await open({
+        directory: true,
+        multiple: false,
+        title: "Choose a folder for the exported files",
+      });
     } catch (err) {
       exportError = describeError(err);
       return;
@@ -426,31 +603,64 @@
       // `markedIntervals` rather than `mutedIntervalsFor`: an export is
       // always of the edited project, even while the transport is
       // auditioning the original — same as the single-track export.
-      const renders = alignRenders(
-        loaded.map((entry) =>
-          renderForExport(trackChannels(entry.buffer), sampleRate, entry.track.markedIntervals, editor.cuts),
-        ),
-      );
+      const longestFrames = Math.max(...loaded.map((t) => t.buffer.length));
+      const stagedRenders: Float32Array[][] = [];
+      for (const [index, entry] of loaded.entries()) {
+        await showExportProgress(
+          0.08 + (0.34 * index) / loaded.length,
+          `Rendering ${entry.speaker}`,
+        );
+        stagedRenders.push(
+          renderForExport(
+            padToFrames(trackChannels(entry.buffer), longestFrames),
+            sampleRate,
+            entry.muted,
+            cuts,
+          ),
+        );
+      }
+      const renders = alignRenders(stagedRenders);
       if (frameCount(renders[0]) === 0) {
-        throw new Error("Nothing left to export — the cuts cover the whole project.");
+        throw new Error(
+          "Nothing left to export — the cuts cover the whole project.",
+        );
       }
 
-      const stem = projectStem(editor.fileName);
+      const stem = exportStem;
       let written = 0;
+      const fileTotal =
+        mode === "both"
+          ? loaded.length + 1
+          : mode === "separate"
+            ? loaded.length
+            : 1;
       if (mode !== "mix") {
         const names = separateTrackFileNames(
           stem,
-          loaded.map((entry) => entry.track.speaker),
+          loaded.map((entry) => entry.speaker),
         );
         for (const [index, name] of names.entries()) {
+          await showExportProgress(
+            0.5 + (0.45 * written) / fileTotal,
+            `Writing ${name}`,
+          );
           await writeWav(joinPath(directory, name), renders[index], sampleRate);
           written++;
         }
       }
       if (mode !== "separate") {
-        await writeWav(joinPath(directory, mixFileName(stem)), combineRenders(renders), sampleRate);
+        await showExportProgress(
+          0.5 + (0.45 * written) / fileTotal,
+          "Mixing and writing combined WAV",
+        );
+        await writeWav(
+          joinPath(directory, mixFileName(stem)),
+          combineRenders(renders),
+          sampleRate,
+        );
         written++;
       }
+      await showExportProgress(1, "Export complete");
       flashExported(written);
     } catch (err) {
       exportError = describeError(err);
@@ -465,9 +675,15 @@
 
   function onKeydown(e: KeyboardEvent): void {
     const target = e.target as HTMLElement | null;
-    const isFormField = !!target && ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName);
+    const isFormField =
+      !!target && ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName);
     const key = e.key.toLowerCase();
-    if ((e.metaKey || e.ctrlKey) && key === "s") {
+    if ((e.metaKey || e.ctrlKey) && ["+", "=", "-", "_"].includes(key)) {
+      e.preventDefault();
+      editor.commitEdit(() =>
+        editor.zoomView(key === "-" || key === "_" ? 1.25 : 0.8),
+      );
+    } else if ((e.metaKey || e.ctrlKey) && key === "s") {
       // Always take over Cmd/Ctrl+S, even in form fields, so the browser's
       // "save page" dialog never has a chance to appear.
       e.preventDefault();
@@ -505,95 +721,179 @@
   }
 </script>
 
-<svelte:window onkeydown={onKeydown} />
+<svelte:window bind:innerWidth={windowWidth} onkeydown={onKeydown} />
 
 <main class="app">
   <header class="toolbar">
     <div class="file-controls">
-      <button class="open" onclick={openRecording} disabled={isLoading}>
-        {isLoading ? "Opening…" : "Open Recording"}
-      </button>
-      <button class="open" onclick={addTrack} disabled={isLoading || !editor.canAddTrack} title="Add a second, already-synced recording as its own lane">
-        Open Track 2…
-      </button>
-      <button class="open" onclick={openProject} disabled={isLoading}>Open Project…</button>
-      <button class="save" onclick={() => saveProject()} disabled={!editor.filePath || isSaving}>
-        {isSaving ? "Saving…" : "Save"}
-      </button>
-      <button class="save" onclick={saveProjectAs} disabled={!editor.filePath || isSaving}>Save As…</button>
-      {#if editor.tracks.length > 1}
-        <div class="export-group" role="group" aria-label="Export">
-          <button
-            class="export"
-            onclick={() => exportProject("separate")}
-            disabled={isExporting}
-            title="One edited WAV per track, same sample rate and length, each with only its own silences and the shared cuts"
-          >
-            {isExporting ? "Exporting…" : "Export Tracks"}
-          </button>
-          <button
-            class="export"
-            onclick={() => exportProject("mix")}
-            disabled={isExporting}
-            title="One mono WAV of both tracks combined at half gain each — no normalization or effects"
-          >
-            Export Mix
-          </button>
-          <button
-            class="export"
-            onclick={() => exportProject("both")}
-            disabled={isExporting}
-            title="Both the separate track WAVs and the combined mix, into one folder"
-          >
-            Export Both
-          </button>
-        </div>
-      {:else}
-        <button
-          class="export"
-          onclick={exportRecording}
-          disabled={!editor.hasAudio || isExporting}
-          title="Export with silences and cuts applied"
-        >
-          {isExporting ? "Exporting…" : "Export"}
-        </button>
-      {/if}
-      <span class="filename">{editor.fileName ?? "No recording loaded"}</span>
+      <FileMenu
+        {isLoading}
+        {isSaving}
+        {isExporting}
+        {exportProgress}
+        {exportStage}
+        {exportError}
+        canSave={!!editor.filePath}
+        canExport={editor.hasAudio}
+        twoTrack={editor.tracks.length > 1}
+        onSave={() => saveProject()}
+        onSaveAs={saveProjectAs}
+        onOpen={openProject}
+        onImport={importRecordings}
+        onExport={startExport}
+        onExportReset={resetExportUi}
+      />
+      <span class="filename"
+        >{isLoading
+          ? "Opening…"
+          : (editor.fileName ?? "No recording loaded")}</span
+      >
       {#if saveError}
         <span class="save-status error">Save failed: {saveError}</span>
       {:else if isSaving}
         <span class="save-status">Saving…</span>
       {:else if editor.projectPath}
-        <span class="save-status">{editor.dirty ? "Unsaved changes" : "Saved"}</span>
+        <span class="save-status"
+          >{editor.dirty ? "Unsaved changes" : "Saved"}</span
+        >
       {/if}
       {#if exportStatus}
         <span class="save-status">{exportStatus}</span>
       {/if}
     </div>
-    <SilenceControls />
+    <Transport />
   </header>
 
-  <section class="stage">
-    {#if editor.tracks.length === 0}
-      <div class="empty">
-        <p>No recording loaded</p>
-        <p class="hint">Open a recording to see its waveform.</p>
+  <div class="workspace">
+    <aside class:collapsed={!paneOpen}>
+      <nav class="pane-tabs" aria-label="Editor panels">
+        {#each ["transcript", "cleanup", "edits"] as name}
+          <button class:active={tab === name} onclick={() => (tab = name)}
+            >{name}</button
+          >
+        {/each}
+      </nav>
+      <div
+        class="pane-content transcript-content"
+        hidden={tab !== "transcript"}
+      >
+        <TranscriptPanel showSelectionActions={false} />
       </div>
-    {:else}
-      {#each editor.tracks as track (track.id)}
-        <TrackLane {track} />
-      {/each}
-      {#if showCutLane}
-        <CutLane />
-      {/if}
-    {/if}
-  </section>
-
-  <TranscriptPanel />
-
-  <footer class="transport-bar">
-    <Transport />
-  </footer>
+      <div class="pane-content" hidden={tab !== "cleanup"}>
+        <h2>Mark non-speaking audio</h2>
+        <p class="pane-hint">
+          Choose VAD plus the dB floor, or run the dB silence floor by itself.
+          The pass runs across all tracks. Silence gap also controls transcript
+          paragraph breaks.
+        </p>
+        <SilenceControls />
+      </div>
+      <div class="pane-content" hidden={tab !== "edits"}>
+        <h2>Review shared cuts</h2>
+        <p class="pane-hint">
+          Cut markers affect every track. Preview edits to hear the result;
+          Export applies them to new files.
+        </p>
+        <button
+          class="bulk-convert"
+          disabled={!editor.tracks.some(
+            (track) => track.markedIntervals.length > 0,
+          )}
+          onclick={() => {
+            editor.convertAllSilencesToCuts();
+            player.refreshIfPlaying();
+          }}
+          title="Every per-track silence marker becomes a shared cut across all tracks"
+          >Convert all silences to shared cuts</button
+        >
+        <p class="pane-hint compact">
+          This clears the silence markers and places their combined ranges in
+          the shared cut lane. Undo restores them.
+        </p>
+        <CutLane reviewOnly />
+        <h2>Marked cuts · {editor.cuts.length}</h2>
+        {#each editor.cuts as cut}
+          <div class="edit-row">
+            <button onclick={() => player.audition(cut)}
+              >{cut.start.toFixed(1)} – {cut.end.toFixed(1)} s</button
+            >
+            <button
+              onclick={() => {
+                editor.restoreCut(cut);
+                player.refreshIfPlaying();
+              }}>Unmark</button
+            >
+          </div>
+        {/each}
+        {#each editor.tracks as track}
+          <h2>{track.speaker} · {track.markedIntervals.length} silences</h2>
+          {#each track.markedIntervals as range}
+            <div class="edit-row">
+              <button
+                onclick={() => {
+                  editor.setActiveTrack(track.id);
+                  player.audition(range);
+                }}>{range.start.toFixed(1)} – {range.end.toFixed(1)} s</button
+              >
+              <button
+                onclick={() => {
+                  editor.setSelection(range.start, range.end, [track.id]);
+                  editor.unmarkSelection();
+                  player.refreshIfPlaying();
+                }}>Unmark</button
+              >
+            </div>
+          {/each}
+        {/each}
+      </div>
+    </aside>
+    <div class="timeline-workspace">
+      <div class="workspace-tools">
+        <button
+          class="with-icon"
+          onclick={() => (paneOpen = !paneOpen)}
+          aria-label="Toggle left pane"
+        >
+          <IconChevron dir={paneOpen ? "left" : "right"} />
+          Panels
+        </button>
+        <span
+          >Synced tracks · {editor.preview === "edited"
+            ? "Previewing edits"
+            : "Mark & review"}</span
+        >
+        <button
+          onclick={() => {
+            editor.setView(0, editor.displayKeptDuration);
+          }}>Fit recording</button
+        >
+        <button
+          class="icon-btn"
+          disabled={!editor.canUndo}
+          onclick={() => {
+            editor.undo();
+            player.refreshIfPlaying();
+          }}
+          aria-label="Undo"
+        >
+          <IconUndo />
+        </button>
+        <button
+          class="icon-btn"
+          disabled={!editor.canRedo}
+          onclick={() => {
+            editor.redo();
+            player.refreshIfPlaying();
+          }}
+          aria-label="Redo"
+        >
+          <IconRedo />
+        </button>
+      </div>
+      <TimelineStack />
+      <SelectionActions />
+    </div>
+  </div>
 
   {#if loadError}
     <p class="error">{loadError}</p>
@@ -604,6 +904,144 @@
 </main>
 
 <style>
+  .workspace {
+    position: relative;
+    display: flex;
+    flex: 1;
+    min-height: 0;
+    gap: 0.75rem;
+  }
+  aside {
+    width: 330px;
+    min-width: 265px;
+    max-width: 45%;
+    resize: horizontal;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    background: var(--panel);
+    border: 1px solid var(--panel-line);
+    border-radius: 6px;
+  }
+  aside.collapsed {
+    display: none;
+  }
+  .pane-tabs {
+    display: flex;
+    padding: 0.5rem;
+    gap: 0.25rem;
+    border-bottom: 1px solid var(--panel-line);
+  }
+  .pane-tabs button {
+    flex: 1;
+    text-transform: capitalize;
+    font-size: 0.75rem;
+  }
+  .pane-tabs button.active {
+    background: var(--amber);
+    color: var(--chassis);
+  }
+  .pane-content {
+    flex: 1;
+    min-height: 0;
+    overflow: auto;
+    padding: 1rem;
+  }
+  .pane-content[hidden] {
+    display: none;
+  }
+  .transcript-content {
+    padding: 0;
+    display: flex;
+    overflow: hidden;
+  }
+  h2 {
+    font-size: 0.85rem;
+    margin: 0.5rem 0 1rem;
+  }
+  .pane-hint {
+    font-size: 0.75rem;
+    line-height: 1.6;
+    color: var(--cream-dim);
+    margin-bottom: 1.5rem;
+  }
+  .timeline-workspace {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  .workspace-tools {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+  .workspace-tools span {
+    flex: 1;
+    font-size: 0.7rem;
+    color: var(--cream-dim);
+  }
+  .workspace-tools button {
+    font-size: 0.7rem;
+  }
+  .with-icon,
+  .icon-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.35rem;
+  }
+  .icon-btn {
+    padding: 0.4rem;
+  }
+  .edit-row {
+    display: flex;
+    justify-content: space-between;
+    gap: 0.5rem;
+    margin-bottom: 0.4rem;
+  }
+  .edit-row button {
+    font-size: 0.7rem;
+  }
+  .bulk-convert {
+    width: 100%;
+    margin-bottom: 0.5rem;
+  }
+  .pane-hint.compact {
+    margin-bottom: 1rem;
+    line-height: 1.4;
+  }
+  @media (max-width: 1100px) {
+    aside {
+      width: 280px;
+      min-width: 245px;
+    }
+    .filename {
+      display: none;
+    }
+  }
+  @media (max-width: 900px) {
+    aside:not(.collapsed) {
+      position: absolute;
+      top: 48px;
+      bottom: 0;
+      left: 0;
+      z-index: 15;
+      width: 300px;
+      max-width: 80%;
+      box-shadow: 0 8px 30px #0009;
+    }
+  }
+
+  .toolbar {
+    display: flex;
+    flex-direction: row;
+    gap: 0.75rem;
+    align-items: center;
+    justify-content: space-between;
+  }
+
   .app {
     display: flex;
     flex-direction: column;
@@ -612,42 +1050,11 @@
     gap: 0.75rem;
   }
 
-  .toolbar {
-    display: flex;
-    flex-direction: column;
-    gap: 0.75rem;
-    padding: 0.85rem 1rem;
-    background: var(--panel);
-    border: 1px solid var(--panel-line);
-    border-top: 1px solid var(--panel-highlight);
-    border-radius: 6px;
-  }
-
   .file-controls {
     display: flex;
     flex-wrap: wrap;
     align-items: center;
-    gap: 0.9rem;
-  }
-
-  /* Segmented so the three two-track export actions read as one control
-     rather than three unrelated toolbar buttons. */
-  .export-group {
-    display: flex;
-  }
-
-  .export-group button {
-    border-radius: 0;
-    border-right-width: 0;
-  }
-
-  .export-group button:first-child {
-    border-radius: 5px 0 0 5px;
-  }
-
-  .export-group button:last-child {
-    border-radius: 0 5px 5px 0;
-    border-right-width: 1px;
+    gap: 0.5rem;
   }
 
   .filename {
@@ -666,37 +1073,6 @@
 
   .save-status.error {
     color: var(--in-color);
-  }
-
-  .stage {
-    flex: 1;
-    min-height: 0;
-    display: flex;
-    flex-direction: column;
-    gap: 0.6rem;
-  }
-
-  .empty {
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    gap: 0.25rem;
-    color: var(--cream-dim);
-    background: var(--panel);
-    border: 1px solid var(--panel-line);
-    border-radius: 6px;
-  }
-
-  .empty p {
-    margin: 0;
-    letter-spacing: 0.04em;
-  }
-
-  .empty .hint {
-    font-size: 0.8rem;
-    opacity: 0.6;
   }
 
   .transport-bar {

@@ -213,6 +213,8 @@ interface SessionSnapshot {
   viewFilter: ViewFilter;
   selectionStartSec: number | null;
   selectionEndSec: number | null;
+  selectionTrackIds: string[];
+  selectionRanges: { trackId: string; start: number; end: number }[];
   playheadSec: number;
   loopInOut: boolean;
 }
@@ -220,6 +222,8 @@ interface SessionSnapshot {
 function cloneSnapshot(snapshot: SessionSnapshot): SessionSnapshot {
   return {
     ...snapshot,
+    selectionTrackIds: [...snapshot.selectionTrackIds],
+    selectionRanges: snapshot.selectionRanges.map(r => ({...r})),
     tracks: snapshot.tracks.map((track) => ({
       rawMarkers: track.rawMarkers.map((r) => ({ ...r })),
       settings: { ...track.settings },
@@ -246,6 +250,8 @@ function settingsEqual(a: SilenceSettings, b: SilenceSettings): boolean {
 /** Backs `EditHistory.discardIfUnchanged` — a gesture that never actually moved anything shouldn't cost an undo step. */
 function snapshotsEqual(a: SessionSnapshot, b: SessionSnapshot): boolean {
   return (
+    a.selectionTrackIds.join() === b.selectionTrackIds.join() &&
+    regionsEqual(a.selectionRanges, b.selectionRanges) &&
     a.activeTrackId === b.activeTrackId &&
     a.preview === b.preview &&
     a.inSec === b.inSec &&
@@ -317,7 +323,7 @@ export class EditorState {
   loopInOut: boolean = $state(false);
 
   /** Untouched recordings, or the project's edits applied — see `PreviewMode`. */
-  preview: PreviewMode = $state("edited");
+  preview: PreviewMode = $state("original");
 
   /**
    * Visible window of the waveform, in *kept* seconds (see `timelineSpans`)
@@ -335,6 +341,13 @@ export class EditorState {
   /** Pending drag-to-select range on the waveform, in seconds. Null when nothing is selected. */
   selectionStartSec: number | null = $state(null);
   selectionEndSec: number | null = $state(null);
+  selectionTrackIds: string[] = $state([]);
+  selectionRanges: { trackId: string; start: number; end: number }[] = $state([]);
+  cutScopePreview = $state(false);
+  markerAction: "silence" | "cut" = $state("silence");
+  readonly selectionTracks = $derived(this.tracks.filter(t => this.selectionTrackIds.includes(t.id)));
+  readonly selectionLabel = $derived(this.selectionTracks.map(t => t.speaker).join(" + "));
+  readonly detectingAny = $derived(this.tracks.some(t => t.isDetectingSilence));
 
   /** Undo/redo over `SessionSnapshot` — see `beginEdit`/`endEdit`/`commitEdit`/`withoutHistory` below. */
   private readonly history = new EditHistory<SessionSnapshot>(cloneSnapshot);
@@ -477,7 +490,8 @@ export class EditorState {
   readonly selectionOverlap: SelectionOverlap | null = $derived.by(() => {
     const range = this.selectionRange;
     if (!range) return null;
-    const fraction = overlapFraction(this.rawMarkers, range.start, range.end);
+    const fractions = this.selectionTracks.map(t => { const span = this.selectionFor(t) ?? range; return overlapFraction(t.rawMarkers, span.start, span.end); });
+    const fraction = fractions.length ? fractions.reduce((a,b) => a+b, 0) / fractions.length : 0;
     if (fraction <= 0) return "unmarked";
     if (fraction >= 1) return "marked";
     return "mixed";
@@ -506,6 +520,8 @@ export class EditorState {
       viewFilter: this.viewFilter,
       selectionStartSec: this.selectionStartSec,
       selectionEndSec: this.selectionEndSec,
+      selectionTrackIds: [...this.selectionTrackIds],
+      selectionRanges: this.selectionRanges.map(r => ({...r})),
       playheadSec: this.playheadSec,
       loopInOut: this.loopInOut,
     };
@@ -530,6 +546,8 @@ export class EditorState {
     this.viewFilter = snapshot.viewFilter;
     this.selectionStartSec = snapshot.selectionStartSec;
     this.selectionEndSec = snapshot.selectionEndSec;
+    this.selectionTrackIds = [...snapshot.selectionTrackIds];
+    this.selectionRanges = snapshot.selectionRanges.map(r => ({...r}));
     this.playheadSec = snapshot.playheadSec;
     this.loopInOut = snapshot.loopInOut;
   }
@@ -569,8 +587,7 @@ export class EditorState {
   /** `beginEdit` / `fn` / `endEdit` for a discrete (non-drag) action — one call, one undo step. */
   commitEdit(fn: () => void): void {
     this.beginEdit();
-    fn();
-    this.endEdit();
+    try { fn(); } finally { this.endEdit(); }
   }
 
   /**
@@ -588,6 +605,9 @@ export class EditorState {
       this.historySuspended = wasSuspended;
     }
   }
+
+  get canUndo(): boolean { void this.revision; return this.history.canUndo; }
+  get canRedo(): boolean { void this.revision; return this.history.canRedo; }
 
   /** Step back one undo entry, if any. No-op on an empty stack. */
   undo(): void {
@@ -724,12 +744,14 @@ export class EditorState {
   }
 
   private resetSessionState(durationSec: number): void {
+    this.markerAction = "silence";
+    this.clearSelection();
     this.playheadSec = 0;
     this.isPlaying = false;
     this.inSec = 0;
     this.outSec = durationSec;
     this.viewFilter = "all";
-    this.preview = "edited";
+    this.preview = "original";
     this.viewStartSec = 0;
     this.viewDurationSec = durationSec;
     this.selectionStartSec = null;
@@ -927,17 +949,26 @@ export class EditorState {
     });
   }
 
+  async detectAllTracks(): Promise<void> {
+    if (this.detectingAny) return;
+    const tracks = [...this.tracks];
+    for (const track of tracks) {
+      if (!this.tracks.includes(track)) break;
+      await this.runSilenceDetection(track);
+    }
+  }
+
+  detectQuietAllTracks(): void {
+    this.commitEdit(() => { for (const track of this.tracks) this.runQuietDetection(track); });
+  }
+
   async runSilenceDetection(track: TrackState | null = this.activeTrack): Promise<void> {
     if (!track?.hasAudio || track.isDetectingSilence) return;
     track.isDetectingSilence = true;
     track.detectionProgress = 0;
     track.detectionError = null;
-    // Opened before the await so the checkpoint captures the regions this
-    // detection run is about to replace. Closed in `finally`, which
-    // discards it as a no-op if detection failed and `rawMarkers` never
-    // changed. Only this track's marks are touched — the other lane's
-    // marks, the accepted cuts, and the dismissed suggestions all stand.
-    this.beginEdit();
+    // Commit only completed results; leave edits made during analysis intact.
+    const audio = track.audioBuffer;
     try {
       const segments = await vadDetector.detect(
         track.monoSamples,
@@ -950,12 +981,18 @@ export class EditorState {
           track.detectionProgress = fraction;
         },
       );
-      track.rawMarkers = silenceRegionsFromSpeechSegments(segments, track.durationSec, track.settings.minSilenceMs);
+      if (!this.tracks.includes(track) || track.audioBuffer !== audio) return;
+      this.commitEdit(() => {
+        for (const range of [
+          ...silenceRegionsFromSpeechSegments(segments, track.durationSec, track.settings.minSilenceMs),
+          ...silenceRegionsFromAmplitude(track.monoSamples, track.sampleRate, track.settings.quietThresholdDb, track.settings.minSilenceMs),
+        ])
+          track.rawMarkers = unionInterval(track.rawMarkers, range.start, range.end);
+      });
     } catch (err) {
       track.detectionError = err instanceof Error ? err.message : String(err);
     } finally {
       track.isDetectingSilence = false;
-      this.endEdit();
     }
   }
 
@@ -1057,12 +1094,34 @@ export class EditorState {
   }
 
   /** Update the pending drag-to-select range. Order-independent; call repeatedly while dragging. */
-  setSelection(startSec: number, endSec: number): void {
+  setSelection(startSec: number, endSec: number, trackIds: string[] = this.activeTrack ? [this.activeTrack.id] : []): void {
+    this.cutScopePreview = this.markerAction === "cut";
+    this.selectionTrackIds = [...trackIds];
     this.selectionStartSec = clamp(startSec, 0, this.durationSec);
     this.selectionEndSec = clamp(endSec, 0, this.durationSec);
+    this.selectionRanges = trackIds.map(trackId => ({trackId, start: Math.min(this.selectionStartSec!, this.selectionEndSec!), end: Math.max(this.selectionStartSec!, this.selectionEndSec!)}));
+  }
+
+  selectTranscriptWords(words: (TranscriptWord & {trackId: string})[]): void {
+    if (!words.length) return;
+    const ranges = new Map<string, {trackId:string;start:number;end:number}>();
+    for (const word of words) {
+      const current = ranges.get(word.trackId);
+      ranges.set(word.trackId, {trackId: word.trackId, start: Math.min(current?.start ?? Infinity, word.start), end: Math.max(current?.end ?? 0, word.end)});
+    }
+    const selected = [...ranges.values()];
+    this.setSelection(Math.min(...selected.map(r => r.start)), Math.max(...selected.map(r => r.end)), [...ranges.keys()]);
+    this.selectionRanges = selected;
+  }
+
+  selectionFor(track: TrackState): Range | null {
+    return this.hasSelection ? this.selectionRanges.find(r => r.trackId === track.id) ?? null : null;
   }
 
   clearSelection(): void {
+    this.selectionTrackIds = [];
+    this.selectionRanges = [];
+    this.cutScopePreview = false;
     this.selectionStartSec = null;
     this.selectionEndSec = null;
   }
@@ -1073,11 +1132,14 @@ export class EditorState {
    * deliberate, however short. Silence never removes time, so the other
    * track and the project duration are untouched.
    */
-  markSelection(track: TrackState | null = this.activeTrack): void {
+  markSelection(track: TrackState | null = null): void {
     this.commitEdit(() => {
       const range = this.selectionRange;
-      if (!range || !track) return;
-      track.rawMarkers = unionInterval(track.rawMarkers, range.start, range.end);
+      if (!range) return;
+      for (const target of track ? [track] : this.selectionTracks) {
+        const span = track ? range : this.selectionFor(target);
+        if (span) target.rawMarkers = unionInterval(target.rawMarkers, span.start, span.end);
+      }
       this.clearSelection();
     });
   }
@@ -1086,32 +1148,73 @@ export class EditorState {
    * Unmark the pending selection, trimming or splitting whatever marked
    * regions it overlaps (see `subtractInterval`).
    */
-  unmarkSelection(track: TrackState | null = this.activeTrack): void {
+  unmarkSelection(track: TrackState | null = null): void {
     this.commitEdit(() => {
       const range = this.selectionRange;
-      if (!range || !track) return;
-      track.rawMarkers = subtractInterval(track.rawMarkers, range.start, range.end);
+      if (!range) return;
+      for (const target of track ? [track] : this.selectionTracks) {
+        const span = track ? range : this.selectionFor(target);
+        if (span) target.rawMarkers = subtractInterval(target.rawMarkers, span.start, span.end);
+      }
       this.clearSelection();
     });
   }
 
-  /** The "m" shortcut: unmark a fully-marked selection, mark anything else. */
-  toggleSelectionMark(): void {
-    if (this.selectionOverlap === "marked") this.unmarkSelection();
-    else if (this.selectionOverlap !== null) this.markSelection();
+  readonly actionOverlap: SelectionOverlap | null = $derived.by(() => {
+    if (this.markerAction === "silence") return this.selectionOverlap;
+    const range = this.selectionRange;
+    if (!range) return null;
+    const fraction = overlapFraction(this.cuts, range.start, range.end);
+    return fraction <= 0 ? "unmarked" : fraction >= 1 ? "marked" : "mixed";
+  });
+
+  markAction(): void {
+    if (this.markerAction === "silence") this.markSelection();
+    else this.cutSelection();
   }
 
-  /**
-   * Call once a drag-select gesture ends. A selection that mostly overlaps
-   * existing marked regions merges into them right away — see
-   * `AUTO_MERGE_OVERLAP_FRACTION` — instead of leaving a "mixed" selection
-   * pending for an explicit Mark click.
-   */
-  finishSelectionDrag(track: TrackState | null = this.activeTrack): void {
-    const range = this.selectionRange;
-    if (!range || !track) return;
-    const fraction = overlapFraction(track.rawMarkers, range.start, range.end);
-    if (fraction >= AUTO_MERGE_OVERLAP_FRACTION && fraction < 1) this.markSelection(track);
+  unmarkAction(): void {
+    if (this.markerAction === "silence") this.unmarkSelection();
+    else {
+      const range = this.selectionRange;
+      if (!range) return;
+      this.commitEdit(() => { this.restoreCut(range); this.clearSelection(); });
+    }
+  }
+
+  /** Change every per-track silence marker into a project-wide cut as one undo step. */
+  convertAllSilencesToCuts(): void {
+    const ranges = normalize(
+      this.tracks.flatMap(track => track.markedIntervals.map(range => ({start: range.start, end: range.end}))),
+      this.durationSec,
+    );
+    if (ranges.length === 0) return;
+    this.commitEdit(() => {
+      this.cuts = normalize([...this.cuts, ...ranges], this.durationSec);
+      this.dismissed = subtract(this.dismissed, ranges);
+      for (const track of this.tracks) track.rawMarkers = [];
+      this.clearSelection();
+    });
+  }
+
+  /** M uses the selected marker action; a fully marked range is unmarked. */
+  toggleSelectionMark(): void {
+    if (this.actionOverlap === "marked") this.unmarkAction();
+    else if (this.actionOverlap !== null) this.markAction();
+  }
+
+  moveCut(index: number, edge: "start" | "end", sec: number): void {
+    const range = this.cuts[index];
+    if (!range) return;
+    const value = clamp(sec, edge === "end" ? range.start + .001 : 0, edge === "start" ? range.end - .001 : this.durationSec);
+    this.cuts = this.cuts.map((cut,i) => i === index ? {...cut,[edge]:value} : cut);
+  }
+
+  finishCutDrag(): void { this.cuts = normalize(this.cuts, this.durationSec); }
+
+  /** Completing a drag only selects; marking is always explicit. */
+  finishSelectionDrag(_track: TrackState | null = this.activeTrack): void {
+    // Selection never applies edits; use the explicit marking actions.
   }
 
   /**
@@ -1122,6 +1225,8 @@ export class EditorState {
   addCut(range: Range): void {
     if (range.end <= range.start) return;
     this.commitEdit(() => {
+      this.setPreview("original");
+      this.setViewFilter("all");
       this.cuts = normalize([...this.cuts, range], this.durationSec);
       // A cut that's been accepted has nothing left to suggest or dismiss.
       this.dismissed = subtract(this.dismissed, [range]);
@@ -1187,6 +1292,12 @@ export class EditorState {
     const maxStart = Math.max(0, total - durationSec);
     this.viewStartSec = clamp(startSec, 0, maxStart);
     this.viewDurationSec = clamp(durationSec, 0, total || durationSec);
+  }
+
+  zoomView(factor: number, anchorKept = this.viewStartSec + this.viewDurationSec / 2, ratio = .5): void {
+    if (!this.hasAudio) return;
+    const duration = clamp(this.viewDurationSec * factor, Math.min(.2, this.displayKeptDuration), this.displayKeptDuration);
+    this.setView(anchorKept - ratio * duration, duration);
   }
 
   /**

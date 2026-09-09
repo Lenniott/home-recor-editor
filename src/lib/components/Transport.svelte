@@ -11,8 +11,19 @@
 </script>
 
 <div class="transport">
-  <button class="play" onclick={() => player.toggle()} disabled={!editor.hasAudio}>
-    {editor.isPlaying ? "Pause" : "Play"}
+  <button
+    type="button"
+    class="preview"
+    class:on={editor.preview === "edited"}
+    aria-pressed={editor.preview === "edited"}
+    title="Hear the project with silences muted and cuts removed"
+    onclick={() => {
+      editor.setPreview(editor.preview === "edited" ? "original" : "edited");
+      player.refreshIfPlaying();
+    }}
+  >
+    Preview edits
+    <span class="switch" aria-hidden="true"></span>
   </button>
 
   <!-- Edited time: the cuts are taken out of both numbers, so this counts what you actually hear. -->
@@ -22,46 +33,70 @@
     <span class="duration">{formatTime(editor.displayKeptDuration)}</span>
   </div>
 
-  <label class="loop">
-    <input
-      type="checkbox"
-      checked={editor.loopInOut}
-      onchange={(e) => editor.setLoopInOut((e.currentTarget as HTMLInputElement).checked)}
-      disabled={!editor.hasAudio}
-    />
-    Loop IN&ndash;OUT
-  </label>
-
-  <div class="marker-readout in">
-    <button onclick={() => player.seek(editor.inSec)} disabled={!editor.hasAudio}>IN</button>
-    <span class="value">{formatTime(editor.inSec)}</span>
-    <button
-      class="set"
-      onclick={() => editor.commitEdit(() => editor.setIn(editor.playheadSec))}
-      disabled={!editor.hasAudio}
-    >
-      set
-    </button>
-  </div>
-
-  <div class="marker-readout out">
-    <button onclick={() => player.seek(editor.outSec)} disabled={!editor.hasAudio}>OUT</button>
-    <span class="value">{formatTime(editor.outSec)}</span>
-    <button
-      class="set"
-      onclick={() => editor.commitEdit(() => editor.setOut(editor.playheadSec))}
-      disabled={!editor.hasAudio}
-    >
-      set
-    </button>
-  </div>
+  <button
+    class="play"
+    onclick={() => player.toggle()}
+    disabled={!editor.hasAudio}
+  >
+    {editor.isPlaying ? "Pause" : "Play"}
+  </button>
 </div>
 
 <style>
+  .preview {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    background: transparent;
+    border-color: transparent;
+    color: var(--cream-dim);
+    padding: 0.35rem 0.15rem;
+  }
+  .preview:hover:not(:disabled) {
+    background: transparent;
+    border-color: transparent;
+    color: var(--cream);
+  }
+  .preview.on {
+    color: var(--cream);
+  }
+  .switch {
+    position: relative;
+    width: 1.7rem;
+    height: 0.95rem;
+    flex-shrink: 0;
+    border-radius: 999px;
+    background: var(--chassis);
+    border: 1px solid var(--panel-line);
+    transition:
+      background 0.15s,
+      border-color 0.15s;
+  }
+  .switch::after {
+    content: "";
+    position: absolute;
+    top: 1px;
+    left: 1px;
+    width: 0.7rem;
+    height: 0.7rem;
+    border-radius: 50%;
+    background: var(--cream-dim);
+    transition:
+      left 0.15s,
+      background 0.15s;
+  }
+  .preview.on .switch {
+    background: var(--amber);
+    border-color: var(--amber);
+  }
+  .preview.on .switch::after {
+    left: calc(100% - 0.7rem - 1px);
+    background: var(--chassis);
+  }
   .transport {
     display: flex;
     align-items: center;
-    gap: 1.5rem;
+    gap: 0.75rem;
     flex-wrap: wrap;
   }
 
@@ -82,50 +117,24 @@
     margin: 0 0.35em;
   }
 
-  .loop {
-    display: flex;
-    align-items: center;
-    gap: 0.4rem;
-    font-family: var(--font-label);
-    font-size: 0.75rem;
-    letter-spacing: 0.04em;
-    color: var(--cream-dim);
-    white-space: nowrap;
-  }
-
-  .marker-readout {
-    display: flex;
-    align-items: center;
-    gap: 0.4rem;
-    font-family: var(--font-mono);
-    font-size: 0.8rem;
-  }
-
-  .marker-readout button:first-child {
-    font-family: var(--font-label);
-    font-size: 0.7rem;
-    letter-spacing: 0.06em;
-    padding: 0.2rem 0.5rem;
-  }
-
-  .marker-readout.in button:first-child {
-    color: var(--in-color);
-    border-color: var(--in-color);
-  }
-
-  .marker-readout.out button:first-child {
-    color: var(--out-color);
-    border-color: var(--out-color);
-  }
-
-  .marker-readout .value {
-    color: var(--cream);
-    min-width: 5ch;
-  }
-
-  .marker-readout .set {
-    font-size: 0.65rem;
-    padding: 0.15rem 0.4rem;
-    opacity: 0.75;
+  @media (max-width: 950px) {
+    .transport {
+      gap: 0.5rem;
+      flex-wrap: nowrap;
+    }
+    .transport button {
+      padding: 0.4rem 0.5rem;
+      font-size: 0.7rem;
+    }
+    .preview {
+      padding: 0.25rem 0.1rem;
+    }
+    .play {
+      min-width: 4rem;
+    }
+    .time {
+      font-size: 0.8rem;
+      white-space: nowrap;
+    }
   }
 </style>

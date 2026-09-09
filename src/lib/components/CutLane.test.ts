@@ -26,6 +26,9 @@ let target: HTMLDivElement;
 function button(text: string): HTMLButtonElement {
   return Array.from(target.querySelectorAll("button")).find((b) => b.textContent?.trim() === text)!;
 }
+function labelled(name: string): HTMLButtonElement {
+  return target.querySelector(`button[aria-label="${name}"]`)!;
+}
 function click(element: Element): void {
   (element as HTMLElement).click();
   flushSync();
@@ -66,21 +69,21 @@ describe("cut lane review", () => {
   });
 
   it("steps through suggestions and auditions each one", () => {
-    click(button("▶"));
+    click(labelled("Next suggestion"));
     expect(target.textContent).toContain("2 / 2");
     expect(player.audition).toHaveBeenCalledWith({ start: 8, end: 10 });
 
-    click(button("◀"));
+    click(labelled("Previous suggestion"));
     expect(target.textContent).toContain("1 / 2");
     expect(player.audition).toHaveBeenLastCalledWith({ start: 3, end: 6 });
   });
 
   it("accepts the current suggestion into the shared cuts", () => {
-    click(button("Accept cut"));
+    click(button("Mark cut"));
 
     expect(editor.cuts).toEqual([{ start: 3, end: 6 }]);
     expect(editor.cutSuggestionList).toEqual([{ start: 8, end: 10 }]);
-    expect(editor.displayKeptDuration).toBe(7);
+    expect(editor.displayKeptDuration).toBe(10);
     expect(target.textContent).toContain("1 cut");
   });
 
@@ -94,17 +97,19 @@ describe("cut lane review", () => {
   });
 
   it("accepts every suggestion at once", () => {
-    click(button("Accept all"));
+    click(button("Mark all suggestions"));
 
     expect(editor.cuts).toEqual([{ start: 3, end: 6 }, { start: 8, end: 10 }]);
     expect(target.textContent).toContain("0 / 0");
   });
 
-  it("puts an accepted cut back when its band is clicked", () => {
-    click(button("Accept cut"));
+  it("selects a cut for the shared Unmark action when its band is clicked", () => {
+    click(button("Mark cut"));
     const cutBand = target.querySelector<HTMLButtonElement>(".mark.cut")!;
     click(cutBand);
-
+    expect(editor.markerAction).toBe("cut");
+    expect(editor.selectionRange).toEqual({start:3,end:6});
+    editor.unmarkAction();
     expect(editor.cuts).toEqual([]);
     expect(editor.displayKeptDuration).toBe(10);
   });

@@ -3,14 +3,14 @@
   directly since CSS custom properties aren't visible to canvas drawing.
 */
 :root {
-  --chassis: #17150f;
-  --panel: #241f1a;
-  --panel-line: #3a332a;
-  --panel-highlight: #4a4132;
+  --chassis: #101318;
+  --panel: #1b2028;
+  --panel-line: #303946;
+  --panel-highlight: #56677c;
 
-  --cream: #f2e6d0;
-  --cream-dim: #b8ac96;
-  --amber: #e2a33c;
+  --cream: #e8edf4;
+  --cream-dim: #9eacbd;
+  --amber: #8bb8ee;
   --in-color: #d1495b;
   --out-color: #3fa79a;
 
@@ -40,9 +40,9 @@ body {
 button {
   font-family: var(--font-label);
   font-size: 0.8rem;
-  letter-spacing: 0.03em;
+  letter-spacing: 0;
   color: var(--cream);
-  background: linear-gradient(180deg, #35302a, #262220);
+  background: #252d38;
   border: 1px solid var(--panel-line);
   border-radius: 5px;
   padding: 0.5rem 0.9rem;
@@ -52,11 +52,11 @@ button {
 
 button:hover:not(:disabled) {
   border-color: var(--panel-highlight);
-  background: linear-gradient(180deg, #3d372f, #2c2723);
+  background: #333f4e;
 }
 
 button:active:not(:disabled) {
-  background: #201c19;
+  background: #171d26;
 }
 
 button:disabled {
@@ -78,7 +78,7 @@ input[type="range"]::-webkit-slider-thumb {
   height: 13px;
   border-radius: 50%;
   background: var(--amber);
-  border: 2px solid #17150f;
+  border: 2px solid #101318;
   cursor: pointer;
 }
 
@@ -87,7 +87,7 @@ input[type="range"]::-moz-range-thumb {
   height: 11px;
   border-radius: 50%;
   background: var(--amber);
-  border: 2px solid #17150f;
+  border: 2px solid #101318;
   cursor: pointer;
 }
 
