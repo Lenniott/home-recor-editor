@@ -23,7 +23,7 @@ const EDGE_NOISE_END = /[.\-\s]+$/;
  * characters, which would otherwise export as a row of dashes.
  */
 export function sanitizeFileNamePart(text: string, fallback: string): string {
-  const cleaned = text
+  const trimmed = text
     // Control characters read as whitespace rather than becoming dashes,
     // so a stray newline doesn't leave "Alex Kim -".
     .replace(/[\x00-\x1f]/g, " ")
@@ -32,9 +32,14 @@ export function sanitizeFileNamePart(text: string, fallback: string): string {
     .replace(EDGE_NOISE_START, "")
     // Windows drops trailing dots and spaces from a name; strip them here
     // so what's written matches what was asked for.
-    .replace(EDGE_NOISE_END, "")
-    .slice(0, MAX_PART_LENGTH)
     .replace(EDGE_NOISE_END, "");
+  // Array.from iterates by code point rather than UTF-16 code unit, so
+  // truncating through it can only ever drop whole characters — a plain
+  // string `.slice()` can cut a surrogate pair in half (an emoji, some CJK
+  // Extension B ideographs), and `encodeURIComponent` throws on the
+  // unpaired surrogate that leaves behind (see `+page.svelte`'s export
+  // path encoding), aborting the export.
+  const cleaned = Array.from(trimmed).slice(0, MAX_PART_LENGTH).join("").replace(EDGE_NOISE_END, "");
   return cleaned.length > 0 ? cleaned : fallback;
 }
 

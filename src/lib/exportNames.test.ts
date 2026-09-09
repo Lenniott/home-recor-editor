@@ -26,6 +26,15 @@ describe("sanitizeFileNamePart", () => {
   it("caps the length", () => {
     expect(sanitizeFileNamePart("x".repeat(200), "fallback")).toHaveLength(60);
   });
+
+  it("truncates by whole character, never splitting a surrogate pair, even when the cap lands mid-pair", () => {
+    // An astral character (outside the BMP, like this emoji) is two UTF-16
+    // code units — placed so a plain `.slice(0, 60)` would cut between them.
+    const name = "a".repeat(59) + "😀" + "extra text past the cap";
+    const result = sanitizeFileNamePart(name, "fallback");
+    expect(() => encodeURIComponent(result)).not.toThrow();
+    expect([...result].every((char) => char.length <= 2)).toBe(true); // no lone surrogate
+  });
 });
 
 describe("projectStem", () => {

@@ -11,6 +11,7 @@
  */
 
 import { renderEdited } from "./applyEdits";
+import { averageChannels } from "./decode";
 import { visibleSpans, type DisplayedInterval } from "./timelineMap";
 
 /** Frames in a render — every channel of one render is the same length. */
@@ -70,19 +71,14 @@ export function alignRenders(renders: Float32Array[][]): Float32Array[][] {
 }
 
 /**
- * Average a render's channels down to one — the same math `mixToMono`
- * applies to an `AudioBuffer`, lifted here so it works on the raw arrays
- * `renderEdited` returns. Always a fresh array.
+ * Average a render's channels down to one — `decode.ts`'s `averageChannels`
+ * (the same math `mixToMono` applies to an `AudioBuffer`), applied to the
+ * raw arrays `renderEdited` returns instead. Always a fresh array.
  */
 export function downmixToMono(channels: Float32Array[]): Float32Array {
   if (channels.length === 0) return new Float32Array(0);
   if (channels.length === 1) return channels[0].slice();
-
-  const mono = new Float32Array(frameCount(channels));
-  for (const data of channels) {
-    for (let i = 0; i < data.length; i++) mono[i] += data[i] / channels.length;
-  }
-  return mono;
+  return averageChannels(channels);
 }
 
 /**
