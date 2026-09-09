@@ -10,6 +10,7 @@
   import { parseProjectFile, sidecarPath } from "$lib/projectFile";
   import { parsePodcastProject, resolveSourcePath, serializePodcastProject, type PodcastProject } from "$lib/projectV2";
   import { vadDetector } from "$lib/vadDetector";
+  import CutLane from "$lib/components/CutLane.svelte";
   import TrackLane from "$lib/components/TrackLane.svelte";
   import SilenceControls from "$lib/components/SilenceControls.svelte";
   import TranscriptPanel from "$lib/components/TranscriptPanel.svelte";
@@ -41,6 +42,8 @@
   let exportStatus: string | null = $state(null);
   let exportStatusTimeout: ReturnType<typeof setTimeout> | undefined;
   let autosaveTimer: ReturnType<typeof setTimeout> | undefined;
+
+  const showCutLane = $derived(editor.tracks.length > 1 || editor.cuts.length > 0 || editor.cutSuggestionList.length > 0);
 
   /**
    * Read, hash, and decode a recording in that order: `decodeAudioFile`
@@ -438,6 +441,9 @@
       {#each editor.tracks as track (track.id)}
         <TrackLane {track} />
       {/each}
+      {#if showCutLane}
+        <CutLane />
+      {/if}
     {/if}
   </section>
 
