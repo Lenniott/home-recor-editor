@@ -6,14 +6,13 @@
  * "marked" span here is exactly what the mute/hide preview already shows.
  */
 
-import { MUTE_FADE_SEC } from "./playbackPlan";
+import { MUTE_FADE_SEC, buildPlaybackPlan } from "./playbackPlan";
 import { visibleSpans, type DisplayedInterval } from "./timelineMap";
 
 /**
  * Render a track the way the edited preview sounds it: its own silenced
- * spans muted in place (duration unchanged), then the project's shared
- * cuts spliced out. Order matters — cuts are expressed in source time, so
- * they have to be taken after the mute, which never moves anything.
+ * spans and shared cuts rendered through the same gain events as playback.
+ * This keeps overlapping silence and cut fades identical in preview and export.
  * Returns fresh arrays; the input channels are never mutated.
  */
 export function renderEdited(
@@ -22,8 +21,31 @@ export function renderEdited(
   mutedIntervals: DisplayedInterval[],
   cuts: DisplayedInterval[],
 ): Float32Array[] {
-  const muted = mutedIntervals.length > 0 ? silenceMarked(channels, sampleRate, mutedIntervals) : channels.map((c) => c.slice());
-  return cuts.length > 0 ? removeMarked(muted, sampleRate, cuts) : muted;
+  const duration = (channels[0]?.length ?? 0) / sampleRate;
+  const plan = buildPlaybackPlan(visibleSpans(duration, cuts, "hideMarked"), 0, duration, [{mutedIntervals}]);
+  if (!plan.chunks.length) throw new Error("Nothing left to export.");
+  const chunks = plan.chunks.map(chunk => ({
+    start: Math.round(chunk.sourceStart * sampleRate),
+    end: Math.round(chunk.sourceEnd * sampleRate),
+  }));
+  const frames = chunks.reduce((sum, chunk) => sum + chunk.end - chunk.start, 0);
+  const output = channels.map(() => new Float32Array(frames));
+  const events = plan.tracks[0].gainEvents;
+  let destination = 0, eventIndex = 0;
+  let previous = {time: 0, value: 1};
+  for (const chunk of chunks) {
+    for (let frame = chunk.start; frame < chunk.end; frame++, destination++) {
+      const time = destination / sampleRate;
+      while (eventIndex < events.length && events[eventIndex].time <= time) previous = events[eventIndex++];
+      const next = events[eventIndex];
+      const gain = next && next.time > previous.time
+        ? previous.value + (next.value - previous.value) * (time - previous.time) / (next.time - previous.time)
+        : previous.value;
+      for (let channel = 0; channel < channels.length; channel++)
+        output[channel][destination] = (channels[channel][frame] ?? 0) * gain;
+    }
+  }
+  return output;
 }
 
 /**

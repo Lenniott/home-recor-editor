@@ -84,15 +84,16 @@ describe("combineRenders", () => {
     expect(Math.max(...mix)).toBe(1);
   });
 
-  it("mixes a multi-channel track down to mono before combining", () => {
+  it("preserves stereo balance and centres the mono speaker", () => {
     // Track A is stereo at 1 / 0 -> mono 0.5; track B is mono at 0.5.
     const stereo = [new Float32Array([1, 1]), new Float32Array([0, 0])];
     const mono = [new Float32Array([0.5, 0.5])];
-    const [mix] = combineRenders([stereo, mono]);
+    const [mix, right] = combineRenders([stereo, mono]);
 
     expect(mix.length).toBe(2);
     // (0.5 + 0.5) / 2
-    expect(Array.from(mix)).toEqual([0.5, 0.5]);
+    expect(Array.from(mix)).toEqual([0.75, 0.75]);
+    expect(Array.from(right)).toEqual([0.25, 0.25]);
   });
 
   it("runs to the longer track's length, padding the shorter with silence", () => {

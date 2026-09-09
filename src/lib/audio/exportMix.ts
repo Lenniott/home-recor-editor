@@ -1,7 +1,7 @@
 /**
  * Multi-track export math: takes each track's edited render (see
  * `renderEdited`) and lines the tracks up with each other, either as
- * separate files of identical length or as one equal-gain mono mix.
+ * separate files of identical length or as one equal-gain stereo mix.
  *
  * Deep module in the same shape as `applyEdits.ts`: `Float32Array[]` in,
  * fresh `Float32Array[]` out — no `AudioBuffer`, no Tauri, no dialogs. The
@@ -82,30 +82,23 @@ export function downmixToMono(channels: Float32Array[]): Float32Array {
 }
 
 /**
- * Sum the tracks into one mono signal at equal gain: each contributes
- * `1 / renders.length`, matching the live preview's per-track gain (see
- * `player.ts`) so the exported mix is what auditioning sounded like. Any
- * track with more than one channel is folded to mono first, which centres
- * it. Fixed headroom, no normalization, compression, or other effects —
- * two full-scale tracks at half gain each still can't exceed unity, and
- * the clamp only guards against arithmetic overshoot.
- *
- * Renders are padded to the longest first, so an unequal-length project
- * mixes to its full length instead of stopping at the shorter track.
+ * Stereo mix at equal track gains. Mono feeds both channels; stereo preserves
+ * left/right balance, matching Web Audio's speaker interpretation in preview.
  */
 export function combineRenders(renders: Float32Array[][]): Float32Array[] {
-  if (renders.length === 0) return [new Float32Array(0)];
-
+  if (renders.length === 0) return [new Float32Array(0), new Float32Array(0)];
   const aligned = alignRenders(renders);
-  const gain = 1 / aligned.length;
-  // Max rather than aligned[0]'s own count: a track the cuts removed
-  // entirely comes through with no channels at all to measure.
   const frames = aligned.reduce((longest, render) => Math.max(longest, frameCount(render)), 0);
-  const mix = new Float32Array(frames);
+  const mix = [new Float32Array(frames), new Float32Array(frames)];
+  const gain = 1 / aligned.length;
   for (const render of aligned) {
-    const mono = downmixToMono(render);
-    for (let i = 0; i < mono.length; i++) mix[i] += mono[i] * gain;
+    for (let channel = 0; channel < 2; channel++) {
+      const source = render[render.length === 1 ? 0 : channel];
+      if (!source) continue;
+      for (let i = 0; i < source.length; i++) mix[channel][i] += source[i] * gain;
+    }
   }
-  for (let i = 0; i < mix.length; i++) mix[i] = Math.max(-1, Math.min(1, mix[i]));
-  return [mix];
+  for (const channel of mix)
+    for (let i = 0; i < channel.length; i++) channel[i] = Math.max(-1, Math.min(1, channel[i]));
+  return mix;
 }
