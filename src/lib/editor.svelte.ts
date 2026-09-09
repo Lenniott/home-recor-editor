@@ -153,27 +153,33 @@ export class TrackState {
   }
 
   /**
-   * This track as the on-disk document shape — the form `projectV2.ts`'s
-   * range algebra (`trackSilences`, `cutSuggestions`) works in.
-   * `rawMarkers` map onto `detected` rather than `manualSilences` because
-   * `detectedSilences` is what applies `bufferMs`, and the buffered bounds
-   * are exactly what this editor shows and mutes (`markedIntervals`).
-   * `toProjectV2` re-shapes the same marks for storage — see there.
+   * This track's silence in the shape `projectV2.ts`'s range algebra
+   * works in (`trackSilences`, `cutSuggestions`). `rawMarkers` map onto
+   * `detected` rather than `manualSilences` because `detectedSilences` is
+   * what applies `bufferMs`, and the buffered bounds are exactly what
+   * this editor shows and mutes (`markedIntervals`). Carries no transcript
+   * — it's recomputed whenever a mark moves, and copying words for that
+   * would be pure waste; `toDocument` fills those in for saving.
    */
-  toDocument(projectPath = ""): TrackDocument {
+  readonly silenceDocument: TrackDocument = $derived.by(() => ({
+    id: this.id,
+    speaker: this.speaker,
+    source: { path: "", name: this.fileName ?? "", sha256: this.sourceSha256 ?? "", duration: this.durationSec },
+    settings: { ...this.settings },
+    detected: this.rawMarkers.map((r) => ({ start: r.start, end: r.end })),
+    manualSilences: [],
+    restored: [],
+    transcript: { status: "missing", words: [] },
+  }));
+
+  /** `silenceDocument` plus everything only a save needs: the source's relative path and the transcript. */
+  toDocument(projectPath: string): TrackDocument {
     return {
-      id: this.id,
-      speaker: this.speaker,
+      ...this.silenceDocument,
       source: {
+        ...this.silenceDocument.source,
         path: this.filePath ? relativeSourcePath(projectPath, this.filePath) : "",
-        name: this.fileName ?? "",
-        sha256: this.sourceSha256 ?? "",
-        duration: this.durationSec,
       },
-      settings: { ...this.settings },
-      detected: this.rawMarkers.map((r) => ({ start: r.start, end: r.end })),
-      manualSilences: [],
-      restored: [],
       transcript: { status: this.transcriptStatus, words: this.transcriptWords.map((w) => ({ ...w })) },
     };
   }
@@ -445,7 +451,7 @@ export class EditorState {
   readonly cutSuggestionList: Range[] = $derived.by(() =>
     this.hasAudio
       ? cutSuggestions(
-          this.tracks.map((t) => t.toDocument()),
+          this.tracks.map((t) => t.silenceDocument),
           this.durationSec,
           this.cuts,
           this.dismissed,
