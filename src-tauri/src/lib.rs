@@ -54,28 +54,81 @@ fn write_text_file(path: &str, contents: &str) -> Result<(), String> {
     })
 }
 
-// Writes an exported recording to a user-chosen path (from the save
-// dialog, same trust model as `read_audio_file`'s open). Mirrors
-// `read_audio_file`'s raw `ipc::Response` trick in reverse: a plain
-// `Vec<u8>` argument would get JSON-serialized as a comma-separated array
-// of numbers on the way in, which grinds to a halt on an hour-long
+// Writes an exported recording to a user-chosen path (from the save or
+// directory dialog, same trust model as `read_audio_file`'s open).
+// Mirrors `read_audio_file`'s raw `ipc::Response` trick in reverse: a
+// plain `Vec<u8>` argument would get JSON-serialized as a comma-separated
+// array of numbers on the way in, which grinds to a halt on an hour-long
 // recording (hundreds of MB) same as it did on the way out. Taking
 // `tauri::ipc::Request` instead lets the frontend send the encoded WAV as
 // a raw binary body; since a raw body can't carry named arguments
 // alongside it, the destination path rides in as an IPC header.
+//
+// An IPC header only survives ASCII, and an export path holds whatever
+// the filesystem and the user's speaker names do (an accented folder, a
+// non-Latin name), so the frontend percent-encodes it — see `writeWav`
+// in `+page.svelte` — and it's decoded back to its real bytes here.
 #[tauri::command]
 fn write_audio_file(request: tauri::ipc::Request<'_>) -> Result<(), String> {
-    let path = request
+    let encoded = request
         .headers()
         .get("path")
         .ok_or_else(|| "missing path header".to_string())?
         .to_str()
         .map_err(|err| err.to_string())?;
+    let path = percent_decode(encoded)?;
     match request.body() {
         tauri::ipc::InvokeBody::Raw(bytes) => {
             std::fs::write(path, bytes).map_err(|err| err.to_string())
         }
         _ => Err("expected a raw binary body".to_string()),
+    }
+}
+
+/// Decodes `encodeURIComponent`'s output back into the original string.
+/// Hand-rolled rather than pulling in a crate: the only producer is our
+/// own frontend, and the grammar is one escape form (`%XX`).
+fn percent_decode(encoded: &str) -> Result<String, String> {
+    let bytes = encoded.as_bytes();
+    let mut decoded = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%' {
+            let hex = encoded
+                .get(i + 1..i + 3)
+                .ok_or_else(|| "truncated escape in path".to_string())?;
+            decoded.push(u8::from_str_radix(hex, 16).map_err(|_| "invalid escape in path".to_string())?);
+            i += 3;
+        } else {
+            decoded.push(bytes[i]);
+            i += 1;
+        }
+    }
+    String::from_utf8(decoded).map_err(|err| err.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::percent_decode;
+
+    #[test]
+    fn decodes_an_escaped_path() {
+        assert_eq!(percent_decode("%2Fhome%2Fal%2FAlex%20Kim-edited.wav").unwrap(), "/home/al/Alex Kim-edited.wav");
+    }
+
+    #[test]
+    fn decodes_multi_byte_characters() {
+        assert_eq!(percent_decode("%2Ftmp%2F%E6%97%A5.wav").unwrap(), "/tmp/日.wav");
+    }
+
+    #[test]
+    fn passes_through_unescaped_text() {
+        assert_eq!(percent_decode("/tmp/plain.wav").unwrap(), "/tmp/plain.wav");
+    }
+
+    #[test]
+    fn rejects_a_truncated_escape() {
+        assert!(percent_decode("/tmp/a%2").is_err());
     }
 }
 
