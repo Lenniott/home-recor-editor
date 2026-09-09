@@ -164,15 +164,17 @@ fn run(
     id: &str,
     cancel: &JobControl,
     command: Command,
-    phase: &str,
+    event_phase: &str,
+    failure_label: &str,
 ) -> Result<(), String> {
     let app = app.clone();
     let id = id.to_owned();
+    let event_phase = event_phase.to_owned();
     run_process(
         command,
         cancel,
-        move |percent| emit(&app, &id, "transcribing", Some(percent), None, None),
-        phase,
+        move |percent| emit(&app, &id, &event_phase, Some(percent), None, None),
+        failure_label,
     )
 }
 
@@ -186,6 +188,33 @@ fn parse_progress(line: &str) -> Option<f64> {
         .parse::<f64>()
         .ok()?;
     percent.is_finite().then(|| percent.clamp(0.0, 100.0))
+}
+
+fn should_retry_without_gpu(error: &str) -> bool {
+    let error = error.to_ascii_lowercase();
+    error.contains("metal") && (error.contains("failed") || error.contains("error"))
+}
+
+fn transcription_command(
+    engine: &Path,
+    model: &Path,
+    audio: &Path,
+    output: &Path,
+    no_gpu: bool,
+) -> Command {
+    let mut command = Command::new(engine);
+    command
+        .arg("-m")
+        .arg(model)
+        .arg("-f")
+        .arg(audio)
+        .arg("-of")
+        .arg(output)
+        .args(["-l", "en", "-oj", "-ml", "1", "-sow", "-pp"]);
+    if no_gpu {
+        command.arg("-ng");
+    }
+    command
 }
 
 fn run_process(
@@ -297,7 +326,14 @@ pub fn download_transcription_model(app: tauri::AppHandle, job_id: String) -> Re
                 ])
                 .arg(&partial)
                 .arg(MODEL_URL);
-            run(&app, &job_id, &cancel, command, "download")?;
+            run(
+                &app,
+                &job_id,
+                &cancel,
+                command,
+                "downloading",
+                "download",
+            )?;
             emit(&app, &job_id, "verifying", None, None, None);
             verify_model(&partial)?;
             if cancel.is_cancelled() {
@@ -353,17 +389,34 @@ pub fn start_transcription(
             let audio = temp.0.join("audio.wav");
             fs::write(&audio, bytes).map_err(|e| e.to_string())?;
             let output = temp.0.join("transcript");
-            let mut command = Command::new(engine_path(&app)?);
-            command
-                .arg("-m")
-                .arg(model)
-                .arg("-f")
-                .arg(audio)
-                .arg("-of")
-                .arg(&output)
-                .args(["-l", "en", "-oj", "-ml", "1", "-sow", "-pp"]);
+            let engine = engine_path(&app)?;
             emit(&app, &id, "transcribing", Some(0.0), None, None);
-            run(&app, &id, &cancel, command, "transcription")?;
+            let gpu_result = run(
+                &app,
+                &id,
+                &cancel,
+                transcription_command(&engine, &model, &audio, &output, false),
+                "transcribing",
+                "transcription",
+            );
+            if let Err(error) = gpu_result {
+                if cancel.is_cancelled() || !should_retry_without_gpu(&error) {
+                    return Err(error);
+                }
+                // Some macOS/WebKit sessions temporarily fail even a small
+                // Metal allocation. Keep the app and job alive, discard any
+                // partial output, and retry the exact same audio on CPU.
+                let _ = fs::remove_file(output.with_extension("json"));
+                emit(&app, &id, "transcribing-cpu", Some(0.0), None, None);
+                run(
+                    &app,
+                    &id,
+                    &cancel,
+                    transcription_command(&engine, &model, &audio, &output, true),
+                    "transcribing-cpu",
+                    "CPU transcription",
+                )?;
+            }
             let json =
                 fs::read_to_string(output.with_extension("json")).map_err(|e| e.to_string())?;
             let result =
@@ -387,6 +440,16 @@ mod tests {
         );
         assert_eq!(parse_progress("progress = NaN%"), None);
         assert_eq!(parse_progress("loading model"), None);
+    }
+
+    #[test]
+    fn retries_only_metal_initialization_failures_on_cpu() {
+        assert!(should_retry_without_gpu(
+            "ggml_backend_metal_buffer_type_alloc_buffer: error: failed to allocate Metal buffer"
+        ));
+        assert!(should_retry_without_gpu("failed to initialize Metal backend"));
+        assert!(!should_retry_without_gpu("Invalid engine output"));
+        assert!(!should_retry_without_gpu("Cancelled"));
     }
 
     #[test]
