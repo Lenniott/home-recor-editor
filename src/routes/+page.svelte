@@ -4,7 +4,9 @@
   import { renderEdited } from "$lib/audio/applyEdits";
   import { decodeAudioFile, mixToMono } from "$lib/audio/decode";
   import { encodeWav } from "$lib/audio/encodeWav";
+  import { alignRenders, combineRenders, frameCount, renderForExport } from "$lib/audio/exportMix";
   import { editor } from "$lib/editor.svelte";
+  import { joinPath, mixFileName, projectStem, separateTrackFileNames } from "$lib/exportNames";
   import { sha256Hex } from "$lib/hash";
   import { player } from "$lib/player";
   import { parseProjectFile, sidecarPath } from "$lib/projectFile";
@@ -305,18 +307,42 @@
     if (dirty && path) autosaveTimer = setTimeout(() => void saveProject(), AUTOSAVE_DELAY_MS);
   });
 
+  /** What one two-track Export action writes: one WAV per track, one combined mix, or both. */
+  type ExportMode = "separate" | "mix" | "both";
+
+  function trackChannels(buffer: AudioBuffer): Float32Array[] {
+    return Array.from({ length: buffer.numberOfChannels }, (_, i) => buffer.getChannelData(i));
+  }
+
+  /**
+   * Encode and write one WAV.
+   *
+   * `write_audio_file` takes the encoded bytes as a raw binary IPC body
+   * rather than a JSON args object — see its Rust-side comment — so the
+   * bytes are passed directly as `invoke`'s args and the destination path
+   * rides along as a header instead. IPC headers only carry ASCII, and an
+   * export's path can hold anything (a speaker's name, an accented
+   * folder), so it's percent-encoded here and decoded Rust-side.
+   */
+  async function writeWav(path: string, channels: Float32Array[], sampleRate: number): Promise<void> {
+    await invoke("write_audio_file", encodeWav(channels, sampleRate), {
+      headers: { path: encodeURIComponent(path) },
+    });
+  }
+
+  function flashExported(fileCount: number): void {
+    exportStatus = fileCount > 1 ? `Exported ${fileCount} files` : "Exported";
+    clearTimeout(exportStatusTimeout);
+    exportStatusTimeout = setTimeout(() => (exportStatus = null), 3000);
+  }
+
   /**
    * Render the active track the way the edited preview sounds it — its
    * own silences muted in place, the shared cuts spliced out (see
    * `renderEdited`) — and write it to a user-chosen path. Nothing is
    * baked into the loaded audio, so exporting is repeatable and the
-   * project stays editable. Separate/combined two-track export is a
-   * follow-up; for now this exports whichever lane is active.
-   *
-   * `write_audio_file` takes the encoded bytes as a raw binary IPC body
-   * rather than a JSON args object — see its Rust-side comment — so
-   * `wavBytes` is passed directly as `invoke`'s args and the destination
-   * path rides along as a header instead.
+   * project stays editable. This is the single-track project's whole
+   * Export; a two-track project goes through `exportProject` instead.
    */
   async function exportRecording(): Promise<void> {
     const track = editor.activeTrack;
@@ -340,13 +366,92 @@
     isExporting = true;
     exportStatus = null;
     try {
-      const channels = Array.from({ length: buffer.numberOfChannels }, (_, i) => buffer.getChannelData(i));
-      const edited = renderEdited(channels, buffer.sampleRate, track.markedIntervals, editor.cuts);
-      const wavBytes = encodeWav(edited, buffer.sampleRate);
-      await invoke("write_audio_file", wavBytes, { headers: { path: destination } });
-      exportStatus = "Exported";
-      clearTimeout(exportStatusTimeout);
-      exportStatusTimeout = setTimeout(() => (exportStatus = null), 3000);
+      const edited = renderEdited(trackChannels(buffer), buffer.sampleRate, track.markedIntervals, editor.cuts);
+      await writeWav(destination, edited, buffer.sampleRate);
+      flashExported(1);
+    } catch (err) {
+      exportError = describeError(err);
+    } finally {
+      isExporting = false;
+    }
+  }
+
+  /**
+   * Export a two-track project: separate per-track WAVs, one combined
+   * mix, or both, from a single directory prompt (N files, so a
+   * single-file save dialog doesn't fit).
+   *
+   * Every mode renders from the same snapshot — each track's own silences
+   * muted in place, the project's shared cuts spliced out, then every
+   * render padded to the longest — so separate files come out with
+   * identical sample rates and frame counts, and the mix agrees with
+   * them sample for sample. Levels and channel layouts survive
+   * untouched in the separate files; only the mix folds to mono, at half
+   * gain per track. Nothing is written back into the loaded audio, so
+   * this is repeatable and leaves the project exactly as editable as it
+   * was.
+   */
+  async function exportProject(mode: ExportMode): Promise<void> {
+    if (isExporting) return;
+    const loaded = editor.tracks.flatMap((track) => {
+      const buffer = track.audioBuffer;
+      return buffer ? [{ track, buffer }] : [];
+    });
+    if (loaded.length < 2) return;
+
+    exportError = null;
+    // Lining two rates up means resampling, which is out of scope — say so
+    // rather than writing files that drift against each other.
+    const sampleRate = loaded[0].buffer.sampleRate;
+    const mismatch = loaded.find((entry) => entry.buffer.sampleRate !== sampleRate);
+    if (mismatch) {
+      exportError =
+        `The tracks were recorded at different sample rates (${sampleRate} Hz and ${mismatch.buffer.sampleRate} Hz). ` +
+        `Convert them to a single rate and reopen the project — exporting doesn't resample.`;
+      return;
+    }
+
+    let directory: string | string[] | null;
+    try {
+      directory = await open({ directory: true, multiple: false, title: "Choose a folder for the exported files" });
+    } catch (err) {
+      exportError = describeError(err);
+      return;
+    }
+    if (!directory || Array.isArray(directory)) return;
+
+    isExporting = true;
+    exportStatus = null;
+    try {
+      // `markedIntervals` rather than `mutedIntervalsFor`: an export is
+      // always of the edited project, even while the transport is
+      // auditioning the original — same as the single-track export.
+      const renders = alignRenders(
+        loaded.map((entry) =>
+          renderForExport(trackChannels(entry.buffer), sampleRate, entry.track.markedIntervals, editor.cuts),
+        ),
+      );
+      if (frameCount(renders[0]) === 0) {
+        throw new Error("Nothing left to export — the cuts cover the whole project.");
+      }
+
+      const stem = projectStem(editor.fileName);
+      let written = 0;
+      if (mode !== "mix") {
+        const names = separateTrackFileNames(
+          stem,
+          loaded.map((entry) => entry.track.speaker),
+        );
+        for (const [index, name] of names.entries()) {
+          await writeWav(joinPath(directory, name), renders[index], sampleRate);
+          written++;
+        }
+      }
+      if (mode !== "separate") {
+        await writeWav(joinPath(directory, mixFileName(stem)), combineRenders(renders), sampleRate);
+        written++;
+      }
+      flashExported(written);
     } catch (err) {
       exportError = describeError(err);
     } finally {
@@ -416,14 +521,43 @@
         {isSaving ? "Saving…" : "Save"}
       </button>
       <button class="save" onclick={saveProjectAs} disabled={!editor.filePath || isSaving}>Save As…</button>
-      <button
-        class="export"
-        onclick={exportRecording}
-        disabled={!editor.hasAudio || isExporting}
-        title={editor.tracks.length > 1 ? "Export the active track with its silences and the shared cuts applied" : "Export with silences and cuts applied"}
-      >
-        {isExporting ? "Exporting…" : editor.tracks.length > 1 ? "Export Track" : "Export"}
-      </button>
+      {#if editor.tracks.length > 1}
+        <div class="export-group" role="group" aria-label="Export">
+          <button
+            class="export"
+            onclick={() => exportProject("separate")}
+            disabled={isExporting}
+            title="One edited WAV per track, same sample rate and length, each with only its own silences and the shared cuts"
+          >
+            {isExporting ? "Exporting…" : "Export Tracks"}
+          </button>
+          <button
+            class="export"
+            onclick={() => exportProject("mix")}
+            disabled={isExporting}
+            title="One mono WAV of both tracks combined at half gain each — no normalization or effects"
+          >
+            Export Mix
+          </button>
+          <button
+            class="export"
+            onclick={() => exportProject("both")}
+            disabled={isExporting}
+            title="Both the separate track WAVs and the combined mix, into one folder"
+          >
+            Export Both
+          </button>
+        </div>
+      {:else}
+        <button
+          class="export"
+          onclick={exportRecording}
+          disabled={!editor.hasAudio || isExporting}
+          title="Export with silences and cuts applied"
+        >
+          {isExporting ? "Exporting…" : "Export"}
+        </button>
+      {/if}
       <span class="filename">{editor.fileName ?? "No recording loaded"}</span>
       {#if saveError}
         <span class="save-status error">Save failed: {saveError}</span>
@@ -494,6 +628,26 @@
     flex-wrap: wrap;
     align-items: center;
     gap: 0.9rem;
+  }
+
+  /* Segmented so the three two-track export actions read as one control
+     rather than three unrelated toolbar buttons. */
+  .export-group {
+    display: flex;
+  }
+
+  .export-group button {
+    border-radius: 0;
+    border-right-width: 0;
+  }
+
+  .export-group button:first-child {
+    border-radius: 5px 0 0 5px;
+  }
+
+  .export-group button:last-child {
+    border-radius: 0 5px 5px 0;
+    border-right-width: 1px;
   }
 
   .filename {
