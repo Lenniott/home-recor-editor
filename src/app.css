@@ -14,6 +14,9 @@
   --in-color: #d1495b;
   --out-color: #3fa79a;
 
+  /* Width of the label column every lane (waveforms and the shared cut lane) reserves, so they line up. */
+  --lane-label-width: 9.5rem;
+
   --font-label: ui-sans-serif, system-ui, "Segoe UI", sans-serif;
   --font-mono: ui-monospace, "SF Mono", "Cascadia Code", "Roboto Mono", monospace;
 

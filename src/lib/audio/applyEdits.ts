@@ -10,6 +10,23 @@ import { MUTE_FADE_SEC } from "./playbackPlan";
 import { visibleSpans, type DisplayedInterval } from "./timelineMap";
 
 /**
+ * Render a track the way the edited preview sounds it: its own silenced
+ * spans muted in place (duration unchanged), then the project's shared
+ * cuts spliced out. Order matters — cuts are expressed in source time, so
+ * they have to be taken after the mute, which never moves anything.
+ * Returns fresh arrays; the input channels are never mutated.
+ */
+export function renderEdited(
+  channels: Float32Array[],
+  sampleRate: number,
+  mutedIntervals: DisplayedInterval[],
+  cuts: DisplayedInterval[],
+): Float32Array[] {
+  const muted = mutedIntervals.length > 0 ? silenceMarked(channels, sampleRate, mutedIntervals) : channels.map((c) => c.slice());
+  return cuts.length > 0 ? removeMarked(muted, sampleRate, cuts) : muted;
+}
+
+/**
  * Zero every marked span, in place duration-wise: same length in and out.
  * Fades from the original signal down to silence over the first
  * `MUTE_FADE_SEC` of each marked span, and back up over the last, so the
