@@ -653,20 +653,33 @@ export class EditorState {
     sha256: string | null = null,
   ): TrackState | null {
     if (this.tracks.length >= MAX_TRACKS) return null;
+    const previousDuration = this.durationSec;
     const track = this.createTrack();
     track.load(buffer, fileName, monoSamples, filePath, sha256);
     this.tracks = [...this.tracks, track];
     this.activeTrackId = track.id;
     const duration = this.durationSec;
     this.outSec = Math.max(this.outSec, duration);
-    if (this.viewDurationSec <= 0) this.setView(0, duration);
+    // Only stretch the view when the new track actually extends the
+    // project — otherwise keep whatever pan/zoom the user already had.
+    if (duration > previousDuration) this.setView(0, duration);
     this.transcriptRestoreToken++;
     this.history.clear();
     this.revision++;
     return track;
   }
 
-  /** Drop a lane and everything scoped to it. Shared cuts stay — they were decisions about the project, not the track. */
+  /**
+   * Drop a lane and everything scoped to it. Shared cuts stay — they were
+   * decisions about the project, not the track — but the removed track
+   * could have been the longest one, so `durationSec` can shrink; every
+   * project-level range/position that was only valid against the old
+   * (longer) duration is re-clamped against the new one here, the same
+   * way `applyProjectV2` clamps a freshly loaded project. Skipping this
+   * would let a cut or workspace position outlive its duration and fail
+   * `parsePodcastProject`'s validation on the next reload, silently
+   * discarding the whole project.
+   */
   removeTrack(id: string): void {
     if (this.tracks.length <= 1) return;
     const remaining = this.tracks.filter((t) => t.id !== id);
@@ -674,6 +687,15 @@ export class EditorState {
     this.tracks = remaining;
     if (this.activeTrackId === id) this.activeTrackId = remaining[0].id;
     this.transcriptRestoreToken++;
+
+    const duration = this.durationSec;
+    this.cuts = normalize(this.cuts, duration);
+    this.dismissed = normalize(this.dismissed, duration);
+    this.playheadSec = clamp(this.playheadSec, 0, duration);
+    this.inSec = clamp(this.inSec, 0, duration);
+    this.outSec = clamp(this.outSec, this.inSec, duration);
+    this.setView(this.viewStartSec, this.viewDurationSec);
+
     this.history.clear();
     this.revision++;
   }

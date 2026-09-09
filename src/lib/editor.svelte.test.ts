@@ -155,6 +155,27 @@ describe("dirty tracking", () => {
     expect(editor.filePath).toBe("/rec/a.wav");
     expect(editor.tracks[0].rawMarkers).toEqual([{ start: 1, end: 2 }]);
   });
+
+  it("stretches the view to fit a second track that's longer than the first", () => {
+    const editor = new EditorState();
+    editor.loadAudio(buffer(10), "a.wav", new Float32Array(160000), "/rec/a.wav", "a".repeat(64));
+    editor.addTrack(buffer(20), "b.wav", new Float32Array(320000), "/rec/b.wav", "b".repeat(64));
+
+    expect(editor.durationSec).toBe(20);
+    expect(editor.viewDurationSec).toBe(20); // stretched to show the newly-longer project
+  });
+
+  it("leaves an existing zoom alone when the second track isn't longer than the first", () => {
+    const editor = new EditorState();
+    editor.loadAudio(buffer(20), "a.wav", new Float32Array(320000), "/rec/a.wav", "a".repeat(64));
+    editor.setView(2, 5); // user zooms in before adding the second track
+
+    editor.addTrack(buffer(3), "b.wav", new Float32Array(48000), "/rec/b.wav", "b".repeat(64));
+
+    expect(editor.durationSec).toBe(20); // the new track is shorter — nothing to stretch for
+    expect(editor.viewStartSec).toBe(2);
+    expect(editor.viewDurationSec).toBe(5); // the zoom the user chose is left alone
+  });
 });
 
 describe("two-track state model", () => {
@@ -246,6 +267,26 @@ describe("two-track state model", () => {
     expect(editor.tracks).toHaveLength(1);
     expect(editor.activeTrack?.id).toBe(editor.tracks[0].id);
     expect(editor.cuts).toEqual([{ start: 2, end: 4 }]);
+  });
+
+  it("re-clamps cuts, dismissed suggestions, and workspace position when removing the longer of two tracks shrinks the project", () => {
+    const editor = twoTrackEditor([6, 10]); // track 0 is 6s, track 1 (removed below) is 10s
+    editor.setSelection(7, 9);
+    editor.cutSelection(); // valid now: project duration is 10 while both tracks are loaded
+    editor.dismissCut({ start: 4, end: 5.5 });
+    editor.setOut(10);
+    editor.setPlayhead(9.5);
+
+    editor.removeTrack(editor.tracks[1].id);
+
+    expect(editor.durationSec).toBe(6);
+    // A cut entirely past the new duration is dropped outright, not left dangling.
+    expect(editor.cuts).toEqual([]);
+    expect(editor.dismissed).toEqual([{ start: 4, end: 5.5 }]);
+    expect(editor.outSec).toBeLessThanOrEqual(6);
+    expect(editor.playheadSec).toBeLessThanOrEqual(6);
+    // The result must still be a project the schema accepts — nothing left over-length.
+    expect(() => editor.toProjectV2("/rec/a.hre.json")).not.toThrow();
   });
 });
 

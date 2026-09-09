@@ -186,9 +186,15 @@
     }
   }
 
-  /** True when a hidden span is one of the project's shared cuts rather than something the view filter collapsed. */
+  /**
+   * True when a hidden span overlaps one of the project's shared cuts —
+   * not necessarily fully: `editor.hiddenIntervals` merges a cut with any
+   * touching/overlapping view-filter-hidden region into one wider span, so
+   * requiring full containment would miss a cut that's only part of a
+   * merged gutter and paint it as ordinary filtered-out audio instead.
+   */
   function isCutSpan(span: TimelineSpan): boolean {
-    return editor.cuts.some((cut) => span.sourceStart >= cut.start - EPS && span.sourceEnd <= cut.end + EPS);
+    return editor.cuts.some((cut) => span.sourceStart < cut.end - EPS && span.sourceEnd > cut.start + EPS);
   }
 
   /** Collapsed spans render as a narrow band — red for a shared cut, teal for marked audio being hidden, neutral otherwise. */

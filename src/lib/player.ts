@@ -69,7 +69,11 @@ export class AudioPlayer {
     }
 
     const contextStart = context.currentTime;
-    const sources: AudioBufferSourceNode[] = [];
+    // Paired with each source's real end time — tracks of different
+    // lengths schedule different numbers of chunks (a shorter track drops
+    // its trailing ones), so the source that actually ends last isn't
+    // necessarily the last one pushed below.
+    const sources: { source: AudioBufferSourceNode; end: number }[] = [];
     const gains: GainNode[] = [];
 
     tracks.forEach((track, index) => {
@@ -90,7 +94,7 @@ export class AudioPlayer {
         source.connect(gainNode);
         const length = Math.min(chunk.sourceEnd, track.audioBuffer.duration) - chunk.sourceStart;
         source.start(contextStart + chunk.playAt, chunk.sourceStart, length);
-        sources.push(source);
+        sources.push({ source, end: chunk.playAt + length });
       }
     });
 
@@ -100,13 +104,18 @@ export class AudioPlayer {
       return;
     }
 
-    const lastSource = sources[sources.length - 1];
+    // `sourceNodes` is replaced wholesale by the next `play()`/`stopSources()`
+    // call, so checking membership (rather than array position, which — per
+    // the comment above — doesn't reliably identify the last-ending source)
+    // tells a stale event from a prior generation apart from one that's
+    // still current.
+    const lastSource = sources.reduce((latest, s) => (s.end > latest.end ? s : latest)).source;
     lastSource.onended = () => {
-      if (this.sourceNodes[this.sourceNodes.length - 1] === lastSource) this.handleEnded();
+      if (this.sourceNodes.includes(lastSource)) this.handleEnded();
     };
 
     this.gainNodes = gains;
-    this.sourceNodes = sources;
+    this.sourceNodes = sources.map((s) => s.source);
     this.plan = plan;
     this.planContextStart = contextStart;
     this.editor.setPlayhead(startSec);
