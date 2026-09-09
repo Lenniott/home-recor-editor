@@ -31,7 +31,13 @@ npm run tauri -- build --bundles app
 
 Word timestamps are approximate. Audition the range and adjust its edges in the waveform when needed. Marks follow the editor's existing edge-buffer settings. Selecting text shows the full timeline so hidden audio can be selected too.
 
-Transcripts are session-only. Opening another recording or applying an audio removal/mute clears them; click **Transcribe again** for updated timings. Saving a project still saves the audio marks, not the transcript. Text cannot be changed or deleted directly, and this version does not automatically find filler words.
+Transcripts save with the project and reload with it — no re-transcribing after a save/reopen. Opening a different recording or applying an audio removal/mute clears the current transcript; click **Transcribe again** for updated timings. Text cannot be changed or deleted directly, and this version does not automatically find filler words.
+
+## Projects
+
+**Save**/Cmd+S writes next to the recording the first time (`<name>.hre.json`) and to that same file afterward; **Save As…** picks a different location, independent of where the recording lives. **Open Project…** opens a `.hre.json` directly — if its recording has moved, you're prompted to locate it. Once a project has a save location, edits (including a finished transcript) autosave shortly after you stop making them; the toolbar shows Saving…/Saved/Unsaved changes. Writes are atomic, so an interrupted save never leaves a corrupt project file.
+
+Each project records its recording's content hash (SHA-256) and duration. Reopening against a file whose bytes have changed clamps marks to the new duration and drops the transcript — its word timestamps can't be trusted against audio that's no longer the same. Project files predating this format (version 1, marks/settings only, no transcript) still open and upgrade to the current format on next save.
 
 ## Transcription implementation
 

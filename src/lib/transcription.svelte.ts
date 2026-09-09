@@ -49,6 +49,20 @@ export class Transcription {
     if (!this.jobId) this.phase = "idle";
   }
 
+  /**
+   * Seed already-known results — e.g. a transcript restored from a saved
+   * project — without running a job. Call after `setAudio` for the audio
+   * these words belong to; skips the update if nothing would change, so
+   * a caller re-applying the same restored transcript doesn't bounce
+   * reactive consumers (see `TranscriptPanel.svelte`'s restore effect).
+   */
+  restore(words: TranscriptWord[], completed: boolean): void {
+    if (this.words === words && this.completed === completed) return;
+    this.words = words;
+    this.completed = completed;
+    this.invalidated = false;
+  }
+
   private receive(event: Progress): void {
     if (event.jobId !== this.jobId || this.disposed) return;
     if (this.phase === "cancelling" && !["complete", "error", "cancelled"].includes(event.phase)) return;

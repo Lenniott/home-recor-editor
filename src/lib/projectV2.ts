@@ -1,5 +1,6 @@
 import type { TranscriptWord } from './transcript';
 import type { ProjectSettings } from './projectFile';
+import type { ViewFilter } from './audio/timelineMap';
 import { applySilenceBuffer, subtractInterval, unionInterval } from './audio/silence';
 
 export interface Range { start: number; end: number }
@@ -24,6 +25,10 @@ export interface Workspace {
   inSec: number;
   outSec: number;
   loop: boolean;
+  /** Which parts of the timeline the waveform/playback show — see `EditorState.viewFilter`. */
+  viewFilter: ViewFilter;
+  /** Duck marked audio during preview instead of hiding it — see `EditorState.muteMarked`. */
+  muteMarked: boolean;
 }
 export interface PodcastProject {
   version: 2;
@@ -93,9 +98,38 @@ export function parsePodcastProject(json: string): PodcastProject {
   const duration = Math.max(...p.tracks.map((t: TrackDocument) => t.source.duration));
   p.cuts = ranges(p.cuts, duration); p.dismissed = ranges(p.dismissed, duration);
   const w = p.workspace;
-  if (!w || !ids.has(w.activeTrackId) || !['original', 'edited', 'review'].includes(w.preview) || !['transcript', 'cleanup', 'edits'].includes(w.tab) || ![w.viewStartSec, w.viewDurationSec, w.inSec, w.outSec, w.sidebarWidth].every(finite) || w.inSec < 0 || w.outSec > duration || w.outSec < w.inSec || w.viewStartSec < 0 || w.viewDurationSec <= 0 || typeof w.loop !== 'boolean' || typeof w.sidebarOpen !== 'boolean') throw new Error('Invalid project workspace');
+  if (!w || !ids.has(w.activeTrackId) || !['original', 'edited', 'review'].includes(w.preview) || !['transcript', 'cleanup', 'edits'].includes(w.tab) || ![w.viewStartSec, w.viewDurationSec, w.inSec, w.outSec, w.sidebarWidth].every(finite) || w.inSec < 0 || w.outSec > duration || w.outSec < w.inSec || w.viewStartSec < 0 || w.viewDurationSec <= 0 || typeof w.loop !== 'boolean' || typeof w.sidebarOpen !== 'boolean' || !['all', 'hideMarked', 'hideUnmarked'].includes(w.viewFilter) || typeof w.muteMarked !== 'boolean') throw new Error('Invalid project workspace');
   w.sidebarWidth = Math.max(260, Math.min(520, w.sidebarWidth));
   return p as PodcastProject;
+}
+
+/** Build the on-disk JSON string for a project — the write-side counterpart to `parsePodcastProject`. */
+export function serializePodcastProject(project: PodcastProject): string {
+  return JSON.stringify(project, null, 2);
+}
+
+/**
+ * Reconcile a track against the actually-decoded source: same reasoning
+ * as `reconcileProjectWithDuration` in `projectFile.ts`, extended with
+ * content identity. A changed `sha256` means the bytes on disk are not
+ * the bytes this track's edits/transcript were made against — even if
+ * the duration happens to still match — so ranges are clamped to the
+ * real duration and, since word-level timestamps can never be verified
+ * from the duration alone, the transcript is dropped rather than reused
+ * against audio it might no longer describe. A no-op when identity and
+ * duration both still match.
+ */
+export function reconcileTrack(track: TrackDocument, actualDuration: number, actualSha256: string): TrackDocument {
+  if (track.source.sha256 === actualSha256 && track.source.duration === actualDuration) return track;
+  const clamp = (r: Range[]) => normalize(r, actualDuration);
+  return {
+    ...track,
+    source: { ...track.source, duration: actualDuration, sha256: actualSha256 },
+    detected: clamp(track.detected),
+    manualSilences: clamp(track.manualSilences),
+    restored: clamp(track.restored),
+    transcript: { status: 'missing', words: [] },
+  };
 }
 
 function pathParts(path: string): string[] {

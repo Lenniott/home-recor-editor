@@ -92,6 +92,33 @@ describe("transcription lifecycle", () => {
   });
 });
 
+describe("restore", () => {
+  it("seeds words/completed without starting a job, and clears invalidated", async () => {
+    const state = new Transcription(); await state.init(); state.setAudio(audio());
+    expect(state.invalidated).toBe(false);
+    state.setAudio(audio()); // a second, distinct AudioBuffer — marks invalidated, same as any real audio swap.
+    expect(state.invalidated).toBe(true);
+
+    const words = [{ text: "hi", start: 0, end: 0.3 }];
+    state.restore(words, true);
+
+    expect(state.words).toBe(words);
+    expect(state.completed).toBe(true);
+    expect(state.invalidated).toBe(false);
+    expect(state.busy).toBe(false);
+    expect(mocked.invoke.mock.calls.some(c => c[0] === "start_transcription")).toBe(false);
+  });
+
+  it("is a no-op when called again with the same words/completed", () => {
+    const state = new Transcription();
+    const words = [{ text: "hi", start: 0, end: 0.3 }];
+    state.restore(words, true);
+    const sameWords = state.words;
+    state.restore(words, true);
+    expect(state.words).toBe(sameWords);
+  });
+});
+
 describe("text ranges in the real editor", () => {
   it("marks, merges, unmasks and undoes a word range using existing buffer semantics", () => {
     const editor = new EditorState(); editor.loadAudio(audio(), "test.wav", new Float32Array(160000));

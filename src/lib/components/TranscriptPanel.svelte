@@ -53,6 +53,27 @@
     const audio = editor.audioBuffer;
     untrack(() => { transcript.setAudio(audio); anchor = 0; focus = 0; nativeSelectionOwned = false; });
   });
+  // Seed the job runner from a transcript the project just loaded (see
+  // `editor.applyProjectV2`/`applyLegacyProject`). Keyed to
+  // `transcriptRestoreToken` rather than `transcriptWords`/`transcriptStatus`
+  // directly, so this fires exactly once per project load instead of also
+  // re-firing off its own mirrored writes below.
+  let restoredToken = -1;
+  $effect(() => {
+    const token = editor.transcriptRestoreToken;
+    untrack(() => {
+      if (token === restoredToken) return;
+      restoredToken = token;
+      if (editor.transcriptStatus === "complete") transcript.restore(editor.transcriptWords, true);
+    });
+  });
+  // Mirror a freshly completed (or just-restored) transcript back into the
+  // project so it round-trips through save/autosave — see `editor.setTranscript`.
+  $effect(() => {
+    const completed = transcript.completed;
+    const words = transcript.words;
+    untrack(() => { if (completed) editor.setTranscript(words, "complete"); });
+  });
   $effect(() => {
     const index = currentWord;
     if (expanded && editor.isPlaying && index >= 0) {
@@ -247,7 +268,7 @@
     {:else if !transcript.busy}
       <p>{transcript.completed ? "No speech found. Try another recording or transcribe again." : transcript.invalidated ? "The audio changed. Transcribe again to get updated word timings." : "Generate a transcript, then select words to highlight their audio range."}</p>
     {/if}
-    <p class="hint privacy">Audio stays on this Mac. Transcripts last for this session; marks are saved with your project.</p>
+    <p class="hint privacy">Audio stays on this Mac. Transcripts and marks are saved with your project.</p>
   </div>
 </section>
 

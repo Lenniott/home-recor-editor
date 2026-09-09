@@ -34,9 +34,24 @@ fn read_text_file(path: &str) -> Result<Option<String>, String> {
 }
 
 /// Writes (overwriting) a sidecar project file next to the recording.
+///
+/// Writes to a temp file in the same directory first, then renames it
+/// over the destination — `rename` within one filesystem is atomic, so a
+/// crash or power loss mid-write can never leave a truncated/corrupt
+/// project file in place; the reader sees either the old contents or the
+/// new ones, never a partial write. Autosave (see `EditorState`/`+page.svelte`)
+/// depends on this: it writes far more often than a manual Cmd+S ever did.
 #[tauri::command]
 fn write_text_file(path: &str, contents: &str) -> Result<(), String> {
-    std::fs::write(path, contents).map_err(|err| err.to_string())
+    let target = std::path::Path::new(path);
+    let dir = target.parent().filter(|p| !p.as_os_str().is_empty()).unwrap_or_else(|| std::path::Path::new("."));
+    let file_name = target.file_name().and_then(|n| n.to_str()).unwrap_or("project");
+    let tmp = dir.join(format!(".{file_name}.tmp-{}", std::process::id()));
+    std::fs::write(&tmp, contents).map_err(|err| err.to_string())?;
+    std::fs::rename(&tmp, target).map_err(|err| {
+        let _ = std::fs::remove_file(&tmp);
+        err.to_string()
+    })
 }
 
 // Writes an exported recording to a user-chosen path (from the save

@@ -21,7 +21,9 @@ import {
   type ViewFilter,
 } from "./audio/timelineMap";
 import { EditHistory } from "./editHistory";
-import { reconcileProjectWithDuration, type ProjectFile, type ProjectSnapshot } from "./projectFile";
+import { reconcileProjectWithDuration, type ProjectFile } from "./projectFile";
+import { reconcileTrack, relativeSourcePath, trackSilences, type PodcastProject } from "./projectV2";
+import type { TranscriptWord } from "./transcript";
 import { vadDetector } from "./vadDetector";
 
 /** How a pending timeline selection overlaps the currently marked regions. */
@@ -132,10 +134,33 @@ function snapshotsEqual(a: SessionSnapshot, b: SessionSnapshot): boolean {
  */
 export class EditorState {
   fileName: string | null = $state(null);
-  /** Full path of the opened recording — the save destination for its sidecar (see `projectFile.ts`). Null when opened outside Tauri (e.g. tests). */
+  /** Full path of the opened recording (the audio itself) — resolved fresh on every open/relink, never assumed unchanged. Null when opened outside Tauri (e.g. tests). */
   filePath: string | null = $state(null);
+  /**
+   * Full path of the project (`.hre.json`) itself — distinct from
+   * `filePath` since "Save As" can point it somewhere other than next to
+   * the recording. Null until the project has been saved once (see
+   * `dirty`/`markSaved` and `+page.svelte`'s save/autosave flow).
+   */
+  projectPath: string | null = $state(null);
+  /** SHA-256 of `filePath`'s raw bytes, as last verified against disk — see `projectV2.ts`'s `reconcileTrack`. Null until computed (only known once a file has actually been read). */
+  sourceSha256: string | null = $state(null);
+  /** No speaker-naming UI yet (single-lane editor) — persisted so a future two-track workspace has somewhere to read/write it. */
+  speaker: string = $state("Speaker 1");
   audioBuffer: AudioBuffer | null = $state(null);
   monoSamples: Float32Array = $state(new Float32Array(0));
+
+  /** Transcript content, owned here so it survives a save/reload — the actual transcription job lives in `Transcription` (see `transcription.svelte.ts`), which mirrors its completed results in via `setTranscript` and seeds itself from these on load via `transcriptRestoreToken`. */
+  transcriptWords: TranscriptWord[] = $state([]);
+  transcriptStatus: "missing" | "complete" = $state("missing");
+  /** Bumped whenever transcriptWords/transcriptStatus are set by loading a project, so `TranscriptPanel` can seed its transcription job runner exactly once per load without a reactive feedback loop against its own mirrored writes. */
+  transcriptRestoreToken: number = $state(0);
+
+  /** Bumped on every persisted change: undo-tracked edits, undo/redo, settings, and transcript updates. Compared against `savedRevision` — see `dirty`. */
+  revision: number = $state(0);
+  private savedRevision: number = $state(0);
+  /** Whether there is anything new to save since the last successful write. */
+  readonly dirty = $derived(this.revision !== this.savedRevision);
 
   playheadSec: number = $state(0);
   isPlaying: boolean = $state(false);
@@ -274,7 +299,11 @@ export class EditorState {
     if (this.transactionDepth === 0) return;
     this.transactionDepth--;
     if (this.transactionDepth === 0 && !this.historySuspended) {
-      this.history.discardIfUnchanged(this.snapshot(), snapshotsEqual);
+      const discarded = this.history.discardIfUnchanged(this.snapshot(), snapshotsEqual);
+      // A discarded checkpoint means the gesture never actually moved
+      // anything — same case `discardIfUnchanged` exists for — so it
+      // shouldn't mark the project dirty either.
+      if (!discarded) this.revision++;
     }
   }
 
@@ -289,7 +318,7 @@ export class EditorState {
    * Run `fn` without recording any undo step, even if something inside
    * it calls `commitEdit` — for state changes that must never be undone:
    * the playhead ticking during playback, and restoring a just-opened
-   * file (`loadAudio`/`applyProject` clear the stack afterwards anyway).
+   * file (`loadAudio`/`applyProjectV2` clear the stack afterwards anyway).
    */
   withoutHistory(fn: () => void): void {
     const wasSuspended = this.historySuspended;
@@ -304,39 +333,69 @@ export class EditorState {
   /** Step back one undo entry, if any. No-op on an empty stack. */
   undo(): void {
     const previous = this.history.undo(this.snapshot());
-    if (previous) this.applySnapshot(previous);
+    if (previous) {
+      this.applySnapshot(previous);
+      this.revision++;
+    }
   }
 
   /** Step forward one redo entry, if any. No-op on an empty stack or after a fresh edit clears it. */
   redo(): void {
     const next = this.history.redo(this.snapshot());
-    if (next) this.applySnapshot(next);
+    if (next) {
+      this.applySnapshot(next);
+      this.revision++;
+    }
   }
 
-  loadAudio(buffer: AudioBuffer, fileName: string, monoSamples: Float32Array, filePath: string | null = null): void {
+  /**
+   * `sha256` is the just-computed hash of `filePath`'s raw bytes (see
+   * `hash.ts`) — callers hash before decoding, since decoding is what
+   * turns those bytes into `buffer` in the first place. Null in contexts
+   * that never hash (tests, audio opened outside Tauri).
+   */
+  loadAudio(
+    buffer: AudioBuffer,
+    fileName: string,
+    monoSamples: Float32Array,
+    filePath: string | null = null,
+    sha256: string | null = null,
+  ): void {
     this.audioBuffer = buffer;
     this.fileName = fileName;
     this.filePath = filePath;
+    this.sourceSha256 = sha256;
     this.monoSamples = monoSamples;
     this.resetSessionState(buffer.duration);
+    this.speaker = "Speaker 1";
+    this.projectPath = null;
     // A freshly opened recording is a new document — Cmd+Z should never
-    // reach back past it into whatever the previous take had.
+    // reach back past it into whatever the previous take had, and there's
+    // nothing yet to save.
     this.history.clear();
+    this.revision = 0;
+    this.savedRevision = 0;
   }
 
   /**
    * Swap the loaded take for a rewritten buffer — where `applySilenceMarked`
    * and `applyRemoveMarked` land once they've baked their edit into new
-   * PCM. Keeps `fileName`/`filePath` (still the same recording), but
-   * otherwise resets like `loadAudio`: a rewritten buffer invalidates the
-   * marks, IN/OUT, and view/filter state built against the old one, and
-   * there's no undo across the rewrite (see those methods).
+   * PCM. Keeps `fileName`/`filePath`/`projectPath`/`speaker`/`sourceSha256`
+   * (still the same recording and the same save destination — baking an
+   * edit never touches the file on disk at `filePath`, only Export does,
+   * to a destination the user picks separately, so the hash of that file
+   * is unaffected), but otherwise resets like `loadAudio`: a rewritten
+   * buffer invalidates the marks, IN/OUT, transcript, and view/filter
+   * state built against the old one, and there's no undo across the
+   * rewrite (see those methods). Marks the project dirty — a bake is a
+   * real edit that autosave should pick up.
    */
   replaceAudio(buffer: AudioBuffer, monoSamples: Float32Array): void {
     this.audioBuffer = buffer;
     this.monoSamples = monoSamples;
     this.resetSessionState(buffer.duration);
     this.history.clear();
+    this.revision++;
   }
 
   private resetSessionState(durationSec: number): void {
@@ -353,6 +412,9 @@ export class EditorState {
     this.viewDurationSec = durationSec;
     this.selectionStartSec = null;
     this.selectionEndSec = null;
+    this.transcriptWords = [];
+    this.transcriptStatus = "missing";
+    this.transcriptRestoreToken++;
   }
 
   /**
@@ -394,40 +456,141 @@ export class EditorState {
     this.replaceAudio(buffer, mixToMono(buffer));
   }
 
-  /** Snapshot of everything a sidecar save persists — see `projectFile.ts`. */
-  toProject(): ProjectSnapshot {
+  /**
+   * Snapshot of everything a project save persists — see `projectV2.ts`.
+   * `projectPath` is where this snapshot is about to be (or was last)
+   * written to, since the source recording's path is stored relative to
+   * it (see `relativeSourcePath`) so the project stays portable if the
+   * pair of files move together.
+   */
+  toProjectV2(projectPath: string): PodcastProject {
+    const id = "track-1";
     return {
-      audioFileName: this.fileName ?? "",
-      durationSec: this.durationSec,
-      rawMarkers: this.rawMarkers.map((r) => ({ start: r.start, end: r.end })),
-      inSec: this.inSec,
-      outSec: this.outSec,
-      settings: { ...this.settings },
-      viewStartSec: this.viewStartSec,
-      viewDurationSec: this.viewDurationSec,
+      version: 2,
+      name: (this.fileName ?? "Untitled").replace(/\.[^./\\]+$/, ""),
+      sampleRate: this.sampleRate,
+      tracks: [
+        {
+          id,
+          speaker: this.speaker,
+          source: {
+            path: this.filePath ? relativeSourcePath(projectPath, this.filePath) : "",
+            name: this.fileName ?? "",
+            sha256: this.sourceSha256 ?? "",
+            duration: this.durationSec,
+          },
+          settings: { ...this.settings },
+          // Every silence region this editor knows about is folded into
+          // manualSilences — see `applyProjectV2`/`trackSilences`. There's
+          // no detected-vs-manual distinction in the single-lane editor
+          // yet, so re-detecting and re-buffering `detected` separately
+          // would just duplicate what's already here.
+          detected: [],
+          manualSilences: this.rawMarkers.map((r) => ({ start: r.start, end: r.end })),
+          restored: [],
+          transcript: { status: this.transcriptStatus, words: this.transcriptWords.map((w) => ({ ...w })) },
+        },
+      ],
+      cuts: [],
+      dismissed: [],
+      workspace: {
+        activeTrackId: id,
+        preview: "edited",
+        tab: "transcript",
+        sidebarWidth: 320,
+        sidebarOpen: true,
+        viewStartSec: this.viewStartSec,
+        viewDurationSec: this.viewDurationSec,
+        inSec: this.inSec,
+        outSec: this.outSec,
+        loop: this.loopInOut,
+        viewFilter: this.viewFilter,
+        muteMarked: this.muteMarked,
+      },
     };
   }
 
   /**
-   * Restore marks, IN/OUT, settings, and the zoom/pan window from a
-   * loaded sidecar. Call after `loadAudio` — reconciles against the
-   * just-decoded duration first (see `reconcileProjectWithDuration`) so
-   * a sidecar saved against a since-modified file doesn't produce
-   * out-of-range marks. `setView` (rather than a direct assignment)
-   * clamps the restored window to what the just-loaded audio actually
-   * supports, since `viewFilter` is still "all" at this point (reset by
-   * `loadAudio`) the "kept" and source timelines are identical, so the
-   * saved seconds carry over directly.
+   * Restore a track's marks, settings, transcript, and workspace state
+   * from a loaded (or just-migrated, see `applyLegacyProject`) v2
+   * project. Call after `loadAudio` — `reconcileTrack` verifies the
+   * track's saved source identity against what was actually just decoded
+   * (`sourceSha256`/`durationSec`) first, so a project saved against a
+   * since-changed file never reuses marks or transcript timestamps that
+   * no longer apply to it.
    */
-  applyProject(project: ProjectFile): void {
+  applyProjectV2(project: PodcastProject, projectPath: string): void {
+    const track = project.tracks.find((t) => t.id === project.workspace.activeTrackId) ?? project.tracks[0];
+    const reconciled = reconcileTrack(track, this.durationSec, this.sourceSha256 ?? "");
+    this.speaker = reconciled.speaker;
+    this.settings = { ...reconciled.settings };
+    this.rawMarkers = trackSilences(reconciled).map((r) => ({ start: r.start, end: r.end }));
+    this.transcriptWords = reconciled.transcript.words.map((w) => ({ ...w }));
+    this.transcriptStatus = reconciled.transcript.status;
+    this.transcriptRestoreToken++;
+    this.projectPath = projectPath;
+
+    const w = project.workspace;
+    this.inSec = clamp(w.inSec, 0, this.durationSec);
+    this.outSec = clamp(w.outSec, this.inSec, this.durationSec);
+    this.loopInOut = w.loop;
+    this.viewFilter = w.viewFilter;
+    this.muteMarked = w.muteMarked;
+    this.setView(w.viewStartSec, w.viewDurationSec);
+
+    // Same reasoning as loadAudio: restoring a project is loading a document, not editing one.
+    this.history.clear();
+    this.revision = 0;
+    this.savedRevision = 0;
+  }
+
+  /**
+   * Restore marks, IN/OUT, settings, and the zoom/pan window from a
+   * version-1 sidecar — the format used before `projectV2.ts`'s
+   * project/track model existed. Call after `loadAudio` — reconciles
+   * against the just-decoded duration first (see
+   * `reconcileProjectWithDuration`) so a sidecar saved against a
+   * since-modified file doesn't produce out-of-range marks. `setView`
+   * (rather than a direct assignment) clamps the restored window to what
+   * the just-loaded audio actually supports, since `viewFilter` is still
+   * "all" at this point (reset by `loadAudio`) the "kept" and source
+   * timelines are identical, so the saved seconds carry over directly.
+   * Version 1 never had a speaker name, a transcript, or its own project
+   * path distinct from the sidecar convention — `loadAudio`'s defaults
+   * for those stand, and `toProjectV2` upgrades this project to version 2
+   * the next time it's saved.
+   */
+  applyLegacyProject(project: ProjectFile, projectPath: string): void {
     const reconciled = reconcileProjectWithDuration(project, this.durationSec);
     this.rawMarkers = reconciled.rawMarkers.map((r) => ({ start: r.start, end: r.end }));
     this.inSec = reconciled.inSec;
     this.outSec = reconciled.outSec;
     this.settings = { ...reconciled.settings };
     this.setView(reconciled.viewStartSec, reconciled.viewDurationSec);
+    this.projectPath = projectPath;
     // Same reasoning as loadAudio: restoring a sidecar is loading a document, not editing one.
     this.history.clear();
+    this.revision = 0;
+    this.savedRevision = 0;
+  }
+
+  /** Merge a completed (or restored) transcript into the project — see `TranscriptPanel.svelte`. */
+  setTranscript(words: TranscriptWord[], status: "missing" | "complete"): void {
+    if (this.transcriptWords === words && this.transcriptStatus === status) return;
+    this.transcriptWords = words;
+    this.transcriptStatus = status;
+    this.revision++;
+  }
+
+  /**
+   * Record that a save has durably written the project as of `revision`
+   * — see `dirty`. Takes the revision explicitly (captured by the caller
+   * before it started building/writing the snapshot) rather than
+   * defaulting to the current one, so an edit that lands while a save is
+   * still in flight stays `dirty` instead of being wrongly marked saved.
+   */
+  markSaved(revision: number): void {
+    this.savedRevision = revision;
   }
 
   /**
@@ -510,18 +673,22 @@ export class EditorState {
 
   setPositiveSpeechThreshold(positiveSpeechThreshold: number): void {
     this.settings = { ...this.settings, positiveSpeechThreshold };
+    this.revision++;
   }
 
   setMinSilenceMs(minSilenceMs: number): void {
     this.settings = { ...this.settings, minSilenceMs };
+    this.revision++;
   }
 
   setBufferMs(bufferMs: number): void {
     this.settings = { ...this.settings, bufferMs: Math.max(0, bufferMs) };
+    this.revision++;
   }
 
   setQuietThresholdDb(quietThresholdDb: number): void {
     this.settings = { ...this.settings, quietThresholdDb };
+    this.revision++;
   }
 
   /**

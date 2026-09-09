@@ -3,10 +3,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { flushSync, mount, unmount } from "svelte";
 import { editor } from "../editor.svelte";
 import { player } from "../player";
+import type { PodcastProject } from "../projectV2";
 import TranscriptPanel from "./TranscriptPanel.svelte";
 
 vi.mock("../player", () => ({ player: { refreshIfPlaying: vi.fn(), seek: vi.fn() } }));
-vi.mock("../transcription.svelte", () => ({ Transcription: class {
+// Exposed via vi.hoisted so tests can spy on its prototype (see "project-provided transcript" below).
+const TranscriptionMock = vi.hoisted(() => class {
   words = [
     { text: "Hello,", start: 1, end: 1.5 },
     { text: "world!", start: 1.6, end: 2.2 },
@@ -15,7 +17,9 @@ vi.mock("../transcription.svelte", () => ({ Transcription: class {
   modelChecked = true; modelReady = true; connected = true; busy = false;
   error = null; completed = true; invalidated = false;
   init() {} dispose() {} setAudio() {}
-} }));
+  restore(words: { text: string; start: number; end: number }[], completed: boolean) { this.words = words; this.completed = completed; }
+});
+vi.mock("../transcription.svelte", () => ({ Transcription: TranscriptionMock }));
 
 let component: ReturnType<typeof mount>;
 let target: HTMLDivElement;
@@ -161,5 +165,63 @@ describe("transcript panel selection", () => {
     window.getSelection()!.setBaseAndExtent(first, 2, second, 0);
     pointer(target.querySelector('[data-word="1"]')!);
     expect([editor.selectionStartSec, editor.selectionEndSec]).toEqual([1, 1.5]);
+  });
+});
+
+describe("project-provided transcript", () => {
+  it("mirrors a completed transcription into the project for saving", () => {
+    // The mocked runner starts already `completed: true` — mounting alone
+    // exercises the mirror effect (see TranscriptPanel's second `$effect`).
+    expect(editor.transcriptStatus).toBe("complete");
+    expect(editor.transcriptWords).toEqual([
+      { text: "Hello,", start: 1, end: 1.5 },
+      { text: "world!", start: 1.6, end: 2.2 },
+      { text: "Next", start: 4, end: 4.4 },
+    ]);
+  });
+
+  it("seeds the job runner from a project's saved transcript on load, without starting a new job", async () => {
+    await unmount(component);
+    editor.loadAudio(
+      { duration: 10, sampleRate: 16000 } as AudioBuffer,
+      "restored.wav",
+      new Float32Array(160000),
+      "/x/restored.wav",
+      "a".repeat(64), // matches the project's stored source.sha256 below — a genuine identity match, not a relink.
+    );
+    const restoredWords = [{ text: "Restored", start: 0, end: 0.6 }];
+    const project: PodcastProject = {
+      version: 2,
+      name: "restored",
+      sampleRate: 16000,
+      tracks: [{
+        id: "t1",
+        speaker: "Speaker 1",
+        source: { path: "restored.wav", name: "restored.wav", sha256: "a".repeat(64), duration: 10 },
+        settings: { positiveSpeechThreshold: 0.5, minSilenceMs: 1200, bufferMs: 150, quietThresholdDb: -40 },
+        detected: [],
+        manualSilences: [],
+        restored: [],
+        transcript: { status: "complete", words: restoredWords },
+      }],
+      cuts: [],
+      dismissed: [],
+      workspace: {
+        activeTrackId: "t1", preview: "edited", tab: "transcript", sidebarWidth: 320, sidebarOpen: true,
+        viewStartSec: 0, viewDurationSec: 10, inSec: 0, outSec: 10, loop: false, viewFilter: "all", muteMarked: false,
+      },
+    };
+    editor.applyProjectV2(project, "/x/restored.hre.json");
+
+    // The fake job runner's fields aren't reactive (unlike the real
+    // `Transcription`), so its DOM never re-renders off a later mutation —
+    // assert on the call itself rather than on rendered words.
+    const restoreSpy = vi.spyOn(TranscriptionMock.prototype, "restore");
+    target = document.createElement("div"); document.body.append(target);
+    component = mount(TranscriptPanel, { target }); flushSync();
+
+    expect(restoreSpy).toHaveBeenCalledWith(editor.transcriptWords, true);
+    expect(editor.transcriptWords).toEqual(restoredWords);
+    restoreSpy.mockRestore();
   });
 });
