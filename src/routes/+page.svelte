@@ -1,6 +1,7 @@
 <script lang="ts">
   import { open, save } from "@tauri-apps/plugin-dialog";
   import { invoke } from "@tauri-apps/api/core";
+  import { renderEdited } from "$lib/audio/applyEdits";
   import { decodeAudioFile, mixToMono } from "$lib/audio/decode";
   import { encodeWav } from "$lib/audio/encodeWav";
   import { editor } from "$lib/editor.svelte";
@@ -9,7 +10,7 @@
   import { parseProjectFile, sidecarPath } from "$lib/projectFile";
   import { parsePodcastProject, resolveSourcePath, serializePodcastProject, type PodcastProject } from "$lib/projectV2";
   import { vadDetector } from "$lib/vadDetector";
-  import Waveform from "$lib/components/Waveform.svelte";
+  import TrackLane from "$lib/components/TrackLane.svelte";
   import SilenceControls from "$lib/components/SilenceControls.svelte";
   import TranscriptPanel from "$lib/components/TranscriptPanel.svelte";
   import Transport from "$lib/components/Transport.svelte";
@@ -22,6 +23,14 @@
   const PROJECT_FILTER = [{ name: "Recor Project", extensions: ["json"] }];
   /** Debounce so a run of quick edits (a drag, a settings slider) writes once, not on every intermediate tick. */
   const AUTOSAVE_DELAY_MS = 1500;
+
+  interface LoadedAudio {
+    buffer: AudioBuffer;
+    mono: Float32Array;
+    sha256: string;
+    path: string;
+    name: string;
+  }
 
   let isLoading = $state(false);
   let loadError: string | null = $state(null);
@@ -38,7 +47,7 @@
    * takes ownership of (detaches) `bytes`' backing buffer, so hashing has
    * to see the raw bytes first — see `hash.ts`/`decode.ts`.
    */
-  async function readAndHashAudio(path: string): Promise<{ buffer: AudioBuffer; mono: Float32Array; sha256: string }> {
+  async function readAndHashAudio(path: string): Promise<LoadedAudio> {
     // The command returns a raw ipc::Response, which invoke() surfaces as an
     // ArrayBuffer. Falls back to a plain number array on platforms where that
     // isn't supported, matching how @tauri-apps/plugin-fs handles the same case.
@@ -46,28 +55,33 @@
     const bytes = raw instanceof ArrayBuffer ? new Uint8Array(raw) : Uint8Array.from(raw);
     const sha256 = await sha256Hex(bytes);
     const buffer = await decodeAudioFile(bytes, player.getContext());
-    return { buffer, mono: mixToMono(buffer), sha256 };
+    return { buffer, mono: mixToMono(buffer), sha256, path, name: path.split(/[\\/]/).pop() ?? path };
   }
 
+  async function pickAudio(title?: string): Promise<string | null> {
+    const selected = await open({ multiple: false, title, filters: AUDIO_FILTER });
+    return selected && !Array.isArray(selected) ? selected : null;
+  }
+
+  /** Open a recording as a new single-track project, restoring its saved project if there is one. */
   async function openRecording(): Promise<void> {
     loadError = null;
 
-    let selected: string | string[] | null;
+    let selected: string | null;
     try {
-      selected = await open({ multiple: false, filters: AUDIO_FILTER });
+      selected = await pickAudio();
     } catch (err) {
       loadError = describeError(err);
       return;
     }
-    if (!selected || Array.isArray(selected)) return;
+    if (!selected) return;
 
     isLoading = true;
     saveError = null;
     try {
-      const { buffer, mono, sha256 } = await readAndHashAudio(selected);
-      const fileName = selected.split(/[\\/]/).pop() ?? selected;
-      editor.loadAudio(buffer, fileName, mono, selected, sha256);
-      await loadProjectIfPresent(selected);
+      const loaded = await readAndHashAudio(selected);
+      editor.loadAudio(loaded.buffer, loaded.name, loaded.mono, loaded.path, loaded.sha256);
+      await loadProjectIfPresent(loaded);
     } catch (err) {
       loadError = describeError(err);
     } finally {
@@ -76,49 +90,125 @@
   }
 
   /**
-   * Restore a previously saved sidecar for this recording, if one exists.
-   * A missing or unreadable sidecar is the normal first-open case, so it
-   * silently leaves the freshly-loaded (empty) marks in place rather than
-   * surfacing an error.
+   * Add a second, already-synced recording as its own lane. Same start
+   * time is assumed (no alignment UI); a different length is fine — the
+   * shorter track's missing tail simply counts as silence.
    */
-  async function loadProjectIfPresent(audioPath: string): Promise<void> {
-    const path = sidecarPath(audioPath);
+  async function addTrack(): Promise<void> {
+    loadError = null;
+    let selected: string | null;
+    try {
+      selected = await pickAudio("Open second track");
+    } catch (err) {
+      loadError = describeError(err);
+      return;
+    }
+    if (!selected) return;
+
+    isLoading = true;
+    try {
+      const loaded = await readAndHashAudio(selected);
+      player.pause();
+      editor.addTrack(loaded.buffer, loaded.name, loaded.mono, loaded.path, loaded.sha256);
+    } catch (err) {
+      loadError = describeError(err);
+    } finally {
+      isLoading = false;
+    }
+  }
+
+  /**
+   * Restore a previously saved sidecar for a just-opened recording, if one
+   * exists. A missing or unreadable sidecar is the normal first-open case,
+   * so it silently leaves the freshly-loaded (empty) marks in place rather
+   * than surfacing an error.
+   */
+  async function loadProjectIfPresent(loaded: LoadedAudio): Promise<void> {
+    const path = sidecarPath(loaded.path);
     try {
       const text = await invoke<string | null>("read_text_file", { path });
-      if (text) applyProjectText(text, path);
+      if (text) await applyProjectText(text, path, loaded);
     } catch {
       // Sidecar read failed (permissions, corrupt file, etc.) — keep going with empty marks.
     }
   }
 
   /**
-   * Apply a loaded project's text against the currently-open audio,
-   * trying the current (version 2) format first and falling back to a
-   * version-1 sidecar from before `projectV2.ts` existed. Call after
-   * `editor.loadAudio`. Silently leaves the freshly-loaded (empty) marks
-   * in place if neither format parses — a corrupt sidecar should never
-   * block opening the audio itself.
+   * Apply a loaded project's text against a just-opened recording, trying
+   * the current (version 2) format first and falling back to a version-1
+   * sidecar from before `projectV2.ts` existed. Silently leaves the
+   * freshly-loaded (empty) marks in place if neither format parses — a
+   * corrupt sidecar should never block opening the audio itself.
    */
-  function applyProjectText(text: string, path: string): void {
+  async function applyProjectText(text: string, path: string, preloaded: LoadedAudio): Promise<void> {
+    let project: PodcastProject;
     try {
-      editor.applyProjectV2(parsePodcastProject(text), path);
-      return;
+      project = parsePodcastProject(text);
     } catch {
       // Not a valid version-2 project — fall through to the legacy format.
+      const legacy = parseProjectFile(text);
+      if (legacy) editor.applyLegacyProject(legacy, path);
+      return;
     }
-    const legacy = parseProjectFile(text);
-    if (legacy) editor.applyLegacyProject(legacy, path);
+    await openParsedProject(project, path, preloaded, false);
+  }
+
+  /**
+   * Load every track a parsed project references and hand them to the
+   * editor in the project's own order, so each saved track lines up with
+   * the recording decoded for it (see `EditorState.applyProjectV2`).
+   * `preloaded` is a recording that's already open, so opening a project
+   * from its own audio doesn't decode that file twice. With `allowRelink`,
+   * a source that has moved prompts for its new location; otherwise a
+   * second track that can't be read is simply left out rather than
+   * blocking the rest of the project.
+   */
+  async function openParsedProject(
+    project: PodcastProject,
+    projectPath: string,
+    preloaded: LoadedAudio | null,
+    allowRelink: boolean,
+  ): Promise<void> {
+    const loaded: LoadedAudio[] = [];
+    for (const [index, track] of project.tracks.entries()) {
+      if (index === 0 && preloaded) {
+        loaded.push(preloaded);
+        continue;
+      }
+      const resolved = resolveSourcePath(projectPath, track.source.path);
+      try {
+        loaded.push(await readAndHashAudio(resolved));
+        continue;
+      } catch (err) {
+        if (!allowRelink) {
+          // Nothing to prompt with (this project came along for the ride
+          // with an audio file the user opened): keep whatever loaded.
+          if (index === 0) throw err;
+          break;
+        }
+      }
+      // Moved or renamed since the project was saved — ask where it went.
+      const relocated = await pickAudio(`Locate "${track.source.name}"`);
+      if (!relocated) {
+        if (index === 0) return;
+        break;
+      }
+      loaded.push(await readAndHashAudio(relocated));
+    }
+    if (loaded.length === 0) return;
+
+    const [first, ...rest] = loaded;
+    editor.loadAudio(first.buffer, first.name, first.mono, first.path, first.sha256);
+    for (const track of rest) editor.addTrack(track.buffer, track.name, track.mono, track.path, track.sha256);
+    editor.applyProjectV2(project, projectPath);
   }
 
   /**
    * Open a `.hre.json` project file directly, without opening its
-   * recording first — for a project saved somewhere other than next to
-   * its audio (see `saveProjectAs`). Resolves the saved track's source
-   * path relative to the chosen project file and reads it; if that fails
-   * (the recording moved or was renamed), prompts to locate it instead of
-   * failing outright. `editor.applyProjectV2` verifies the resolved
-   * file's actual identity against what the project remembers before
-   * reusing any of its marks or transcript timestamps.
+   * recordings first — for a project saved somewhere other than next to
+   * its audio (see `saveProjectAs`). `editor.applyProjectV2` verifies each
+   * resolved file's actual identity against what the project remembers
+   * before reusing any of its marks or transcript timestamps.
    */
   async function openProject(): Promise<void> {
     loadError = null;
@@ -143,26 +233,7 @@
       } catch (err) {
         throw new Error(`Not a valid project file: ${describeError(err)}`);
       }
-      const track = project.tracks.find((t) => t.id === project.workspace.activeTrackId) ?? project.tracks[0];
-      let audioPath = resolveSourcePath(selected, track.source.path);
-      let loaded: { buffer: AudioBuffer; mono: Float32Array; sha256: string };
-      try {
-        loaded = await readAndHashAudio(audioPath);
-      } catch {
-        // Moved or renamed since the project was saved — ask where it went.
-        let relocated: string | string[] | null;
-        try {
-          relocated = await open({ multiple: false, title: `Locate "${track.source.name}"`, filters: AUDIO_FILTER });
-        } catch (err) {
-          throw new Error(describeError(err));
-        }
-        if (!relocated || Array.isArray(relocated)) return;
-        audioPath = relocated;
-        loaded = await readAndHashAudio(audioPath);
-      }
-      const fileName = audioPath.split(/[\\/]/).pop() ?? audioPath;
-      editor.loadAudio(loaded.buffer, fileName, loaded.mono, audioPath, loaded.sha256);
-      editor.applyProjectV2(project, selected);
+      await openParsedProject(project, selected, null, true);
     } catch (err) {
       loadError = describeError(err);
     } finally {
@@ -196,7 +267,7 @@
     }
   }
 
-  /** Choose a new location for the project file, independent of where its recording lives. */
+  /** Choose a new location for the project file, independent of where its recordings live. */
   async function saveProjectAs(): Promise<void> {
     if (!editor.filePath || isSaving) return;
     const stem = (editor.fileName ?? "project").replace(/\.[^./\\]+$/, "");
@@ -224,23 +295,29 @@
   });
 
   /**
-   * Encodes `editor.audioBuffer` (the current take, including any applied
-   * silence/remove edits — never the preview) and writes it to a
-   * user-chosen path. `write_audio_file` takes the encoded bytes as a raw
-   * binary IPC body rather than a JSON args object — see its Rust-side
-   * comment — so `wavBytes` is passed directly as `invoke`'s args and the
-   * destination path rides along as a header instead.
+   * Render the active track the way the edited preview sounds it — its
+   * own silences muted in place, the shared cuts spliced out (see
+   * `renderEdited`) — and write it to a user-chosen path. Nothing is
+   * baked into the loaded audio, so exporting is repeatable and the
+   * project stays editable. Separate/combined two-track export is a
+   * follow-up; for now this exports whichever lane is active.
+   *
+   * `write_audio_file` takes the encoded bytes as a raw binary IPC body
+   * rather than a JSON args object — see its Rust-side comment — so
+   * `wavBytes` is passed directly as `invoke`'s args and the destination
+   * path rides along as a header instead.
    */
   async function exportRecording(): Promise<void> {
-    const buffer = editor.audioBuffer;
-    if (!buffer || isExporting) return;
+    const track = editor.activeTrack;
+    const buffer = track?.audioBuffer;
+    if (!track || !buffer || isExporting) return;
 
     exportError = null;
-    const stem = (editor.fileName ?? "export").replace(/\.[^./\\]+$/, "");
+    const stem = (track.fileName ?? "export").replace(/\.[^./\\]+$/, "");
     let destination: string | null;
     try {
       destination = await save({
-        defaultPath: `${stem}.wav`,
+        defaultPath: `${stem}-edited.wav`,
         filters: [{ name: "WAV", extensions: ["wav"] }],
       });
     } catch (err) {
@@ -253,7 +330,8 @@
     exportStatus = null;
     try {
       const channels = Array.from({ length: buffer.numberOfChannels }, (_, i) => buffer.getChannelData(i));
-      const wavBytes = encodeWav(channels, buffer.sampleRate);
+      const edited = renderEdited(channels, buffer.sampleRate, track.markedIntervals, editor.cuts);
+      const wavBytes = encodeWav(edited, buffer.sampleRate);
       await invoke("write_audio_file", wavBytes, { headers: { path: destination } });
       exportStatus = "Exported";
       clearTimeout(exportStatusTimeout);
@@ -319,13 +397,21 @@
       <button class="open" onclick={openRecording} disabled={isLoading}>
         {isLoading ? "Opening…" : "Open Recording"}
       </button>
+      <button class="open" onclick={addTrack} disabled={isLoading || !editor.canAddTrack} title="Add a second, already-synced recording as its own lane">
+        Open Track 2…
+      </button>
       <button class="open" onclick={openProject} disabled={isLoading}>Open Project…</button>
       <button class="save" onclick={() => saveProject()} disabled={!editor.filePath || isSaving}>
         {isSaving ? "Saving…" : "Save"}
       </button>
       <button class="save" onclick={saveProjectAs} disabled={!editor.filePath || isSaving}>Save As…</button>
-      <button class="export" onclick={exportRecording} disabled={!editor.hasAudio || isExporting}>
-        {isExporting ? "Exporting…" : "Export"}
+      <button
+        class="export"
+        onclick={exportRecording}
+        disabled={!editor.hasAudio || isExporting}
+        title={editor.tracks.length > 1 ? "Export the active track with its silences and the shared cuts applied" : "Export with silences and cuts applied"}
+      >
+        {isExporting ? "Exporting…" : editor.tracks.length > 1 ? "Export Track" : "Export"}
       </button>
       <span class="filename">{editor.fileName ?? "No recording loaded"}</span>
       {#if saveError}
@@ -343,7 +429,16 @@
   </header>
 
   <section class="stage">
-    <Waveform />
+    {#if editor.tracks.length === 0}
+      <div class="empty">
+        <p>No recording loaded</p>
+        <p class="hint">Open a recording to see its waveform.</p>
+      </div>
+    {:else}
+      {#each editor.tracks as track (track.id)}
+        <TrackLane {track} />
+      {/each}
+    {/if}
   </section>
 
   <TranscriptPanel />
@@ -408,6 +503,32 @@
   .stage {
     flex: 1;
     min-height: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.6rem;
+  }
+
+  .empty {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 0.25rem;
+    color: var(--cream-dim);
+    background: var(--panel);
+    border: 1px solid var(--panel-line);
+    border-radius: 6px;
+  }
+
+  .empty p {
+    margin: 0;
+    letter-spacing: 0.04em;
+  }
+
+  .empty .hint {
+    font-size: 0.8rem;
+    opacity: 0.6;
   }
 
   .transport-bar {

@@ -1,12 +1,18 @@
 <script lang="ts">
   import { currentRegionNumber } from "../audio/markerNav";
-  import { editor, type ViewFilter } from "../editor.svelte";
+  import { editor, type PreviewMode, type ViewFilter } from "../editor.svelte";
   import { player } from "../player";
 
-  const markerCount = $derived(editor.markers.filter((r) => r.displayed).length);
+  /**
+   * Detection settings and the mark/cut actions. Everything here except
+   * the preview and cut controls applies to the *active* lane only — see
+   * `EditorState.activeTrack` — so two tracks can be tuned separately
+   * without one detection run touching the other's marks.
+   */
+  const track = $derived(editor.activeTrack);
+  const markerCount = $derived(track ? track.markers.filter((r) => r.displayed).length : 0);
   const currentNumber = $derived(currentRegionNumber(editor.markedIntervals, editor.playheadSec));
-
-  let applyError: string | null = $state(null);
+  const cutLabel = $derived(editor.tracks.length > 1 ? "Cut both tracks" : "Cut");
 
   const VIEW_FILTERS: { value: ViewFilter; label: string }[] = [
     { value: "all", label: "All" },
@@ -14,39 +20,19 @@
     { value: "hideUnmarked", label: "Hide unmarked" },
   ];
 
+  const PREVIEWS: { value: PreviewMode; label: string }[] = [
+    { value: "original", label: "Original" },
+    { value: "edited", label: "Edited" },
+  ];
+
   function applyViewFilter(filter: ViewFilter): void {
     editor.setViewFilter(filter);
     player.refreshIfPlaying();
   }
 
-  function toggleMuteMarked(): void {
-    editor.setMuteMarked(!editor.muteMarked);
+  function applyPreview(preview: PreviewMode): void {
+    editor.setPreview(preview);
     player.refreshIfPlaying();
-  }
-
-  // Destructive: no undo copy of the buffer (see `EditorState.applySilenceMarked`),
-  // so a confirm() is the only safety net. Pause first so playback isn't
-  // scheduled against a buffer that's about to disappear.
-  function applySilence(): void {
-    if (!confirm("Apply silence to marked regions? This can't be undone — re-open the file to revert.")) return;
-    applyError = null;
-    player.pause();
-    try {
-      editor.applySilenceMarked();
-    } catch (err) {
-      applyError = err instanceof Error ? err.message : String(err);
-    }
-  }
-
-  function applyRemove(): void {
-    if (!confirm("Remove marked regions? This can't be undone — re-open the file to revert.")) return;
-    applyError = null;
-    player.pause();
-    try {
-      editor.applyRemoveMarked();
-    } catch (err) {
-      applyError = err instanceof Error ? err.message : String(err);
-    }
   }
 
   function markSelection(): void {
@@ -56,6 +42,11 @@
 
   function unmarkSelection(): void {
     editor.unmarkSelection();
+    player.refreshIfPlaying();
+  }
+
+  function cutSelection(): void {
+    editor.cutSelection();
     player.refreshIfPlaying();
   }
 
@@ -95,6 +86,10 @@
 </script>
 
 <div class="silence-controls">
+  <span class="scope" title="Detection and marking apply to this track">
+    Editing <strong>{track?.speaker ?? "—"}</strong>
+  </span>
+
   <label class="control">
     <span class="label">VAD threshold</span>
     <input
@@ -220,60 +215,42 @@
     </div>
   </div>
 
-  <button
-    type="button"
-    class="mute-toggle"
-    class:active={editor.muteMarked}
-    aria-pressed={editor.muteMarked}
-    onclick={toggleMuteMarked}
-    disabled={!editor.hasAudio}
-    title="Preview the cut: duck marked audio with a 100ms fade"
-  >
-    {editor.muteMarked ? "Marked muted" : "Mute marked"}
-  </button>
-
-  <div class="apply-actions">
-    <button
-      type="button"
-      class="apply apply-silence"
-      onclick={applySilence}
-      disabled={!editor.hasAudio || markerCount === 0}
-      title="Bake silence into marked regions — same length, can't be undone"
-    >
-      Apply silence
-    </button>
-    <button
-      type="button"
-      class="apply apply-remove"
-      onclick={applyRemove}
-      disabled={!editor.hasAudio || markerCount === 0}
-      title="Cut marked regions out — shortens the file, can't be undone"
-    >
-      Apply remove
-    </button>
+  <div class="control view-filter">
+    <span class="label" title="Compare the untouched recordings against the project's silences and cuts">Preview</span>
+    <div class="segmented" role="group" aria-label="Preview mode">
+      {#each PREVIEWS as { value, label } (value)}
+        <button
+          type="button"
+          class="segment"
+          class:active={editor.preview === value}
+          aria-pressed={editor.preview === value}
+          onclick={() => applyPreview(value)}
+          disabled={!editor.hasAudio}
+        >
+          {label}
+        </button>
+      {/each}
+    </div>
   </div>
-
-  {#if applyError}
-    <span class="detect-error">{applyError}</span>
-  {/if}
 
   {#if editor.detectionError}
     <span class="detect-error">{editor.detectionError}</span>
   {/if}
 
-  {#if editor.hasSelection && editor.selectionStartSec !== null && editor.selectionEndSec !== null}
+  {#if editor.selectionRange}
     <div class="selection-actions">
       <span class="selection-range">
-        {formatTime(Math.min(editor.selectionStartSec, editor.selectionEndSec))}&ndash;{formatTime(
-          Math.max(editor.selectionStartSec, editor.selectionEndSec),
-        )}
+        {formatTime(editor.selectionRange.start)}&ndash;{formatTime(editor.selectionRange.end)}
       </span>
       {#if editor.selectionOverlap === "unmarked" || editor.selectionOverlap === "mixed"}
-        <button class="mark" onclick={markSelection} title="Shortcut: m">Mark <kbd>m</kbd></button>
+        <button class="mark" onclick={markSelection} title="Silence this range on {track?.speaker ?? 'this track'} — shortcut: m">
+          Silence {track?.speaker ?? ""} <kbd>m</kbd>
+        </button>
       {/if}
       {#if editor.selectionOverlap === "marked" || editor.selectionOverlap === "mixed"}
         <button class="unmark" onclick={unmarkSelection} title="Shortcut: m">Unmark <kbd>m</kbd></button>
       {/if}
+      <button class="cut" onclick={cutSelection} title="Remove this range from every track — reversible">{cutLabel}</button>
       <button class="clear" onclick={() => editor.clearSelection()} aria-label="Clear selection" title="Shortcut: Esc">✕</button>
     </div>
   {/if}
@@ -291,6 +268,17 @@
     display: flex;
     align-items: center;
     gap: 0.5rem;
+  }
+
+  .scope {
+    font-size: 0.75rem;
+    color: var(--cream-dim);
+    white-space: nowrap;
+  }
+
+  .scope strong {
+    color: var(--amber);
+    font-weight: 600;
   }
 
   .label {
@@ -383,33 +371,6 @@
     background: var(--amber);
   }
 
-  .mute-toggle {
-    font-size: 0.75rem;
-    white-space: nowrap;
-  }
-
-  .mute-toggle.active {
-    color: var(--out-color);
-    border-color: var(--out-color);
-    background: rgba(63, 167, 154, 0.16);
-  }
-
-  .apply-actions {
-    display: flex;
-    gap: 0.4rem;
-  }
-
-  .apply {
-    font-size: 0.75rem;
-    white-space: nowrap;
-    color: var(--in-color);
-    border-color: var(--in-color);
-  }
-
-  .apply:hover:not(:disabled) {
-    background: rgba(209, 73, 91, 0.16);
-  }
-
   .selection-actions {
     display: flex;
     align-items: center;
@@ -428,7 +389,8 @@
   }
 
   .selection-actions .mark,
-  .selection-actions .unmark {
+  .selection-actions .unmark,
+  .selection-actions .cut {
     font-size: 0.75rem;
     padding: 0.25rem 0.6rem;
     white-space: nowrap;
@@ -440,6 +402,10 @@
   }
 
   .selection-actions .unmark {
+    color: var(--cream-dim);
+  }
+
+  .selection-actions .cut {
     color: var(--in-color);
     border-color: var(--in-color);
   }

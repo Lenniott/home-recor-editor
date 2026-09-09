@@ -1,14 +1,20 @@
 /**
- * Turns timeline spans (what the view filter is hiding) plus the mute
- * flag into what the player actually has to schedule: which slices of
- * the source buffer to play back-to-back, and a gain automation curve
- * layered on top of all of them. Pure math — the player just feeds this
- * into AudioBufferSourceNode.start() calls and a GainNode.
+ * Turns the shared timeline (what cuts and the view filter remove) plus
+ * each track's own silenced spans into what the player actually has to
+ * schedule: which slices of the source buffers to play back-to-back, and
+ * one gain automation curve per track layered on top of all of them.
+ * Pure math — the player just feeds this into AudioBufferSourceNode.start()
+ * calls and one GainNode per track.
+ *
+ * Every track is scheduled against the same chunk list, which is what
+ * keeps two synced recordings in sync: a cut removes the same span of
+ * time from both at once, while a track's own silence only ever ducks
+ * its own gain and never moves anything.
  */
 
-import type { DisplayedInterval, TimelineSpan, ViewFilter } from "./timelineMap";
+import type { DisplayedInterval, TimelineSpan } from "./timelineMap";
 
-/** Fade duration for ducking marked audio or smoothing a skip splice. */
+/** Fade duration for ducking silenced audio or smoothing a skip splice. */
 export const MUTE_FADE_SEC = 0.1;
 
 export interface PlaybackChunk {
@@ -24,42 +30,66 @@ export interface GainEvent {
   value: number;
 }
 
-export interface PlaybackPlan {
-  chunks: PlaybackChunk[];
-  /** Empty means constant gain 1 — no automation needed. */
+export interface TrackPlaybackInput {
+  /**
+   * This track's own spans to silence in place (buffer-adjusted
+   * `displayed` bounds). They never shorten playback — the gain is ducked
+   * across them and the timeline keeps running.
+   */
+  mutedIntervals: DisplayedInterval[];
+  /** Steady-state gain for this track — e.g. 0.5 each when two tracks play at once. Defaults to 1. */
+  gain?: number;
+}
+
+export interface TrackPlayback {
+  /** Constant gain to start the track's GainNode at, before any events. */
+  gain: number;
+  /** Empty means constant `gain` — no automation needed. */
   gainEvents: GainEvent[];
+}
+
+export interface PlaybackPlan {
+  /** Shared by every track: one span of the timeline that survives the cuts. */
+  chunks: PlaybackChunk[];
   /** Total length of the plan's timeline; sum of all chunk lengths. */
   totalSec: number;
+  /** Parallel to the `tracks` argument. */
+  tracks: TrackPlayback[];
 }
 
 /**
- * Build a plan to play `[startSourceSec, endSourceSec)` of the source
- * buffer, skipping any `hidden` spans (the current view filter) and,
- * when `muteMarked` is on, silencing marked audio with a 100ms fade
- * (ducked in place for "all", faded across the splice for "hideMarked").
- * "hideUnmarked" ignores `muteMarked` — muting the only audio left to
- * hear would be pointless.
+ * Build a plan to play `[startSourceSec, endSourceSec)` of the project's
+ * shared timeline: `spans` says which stretches survive (see
+ * `EditorState.timelineSpans` — cuts and the view filter both collapse to
+ * `hidden` spans), and each entry in `tracks` contributes its own
+ * in-place silences.
+ *
+ * Every join between two chunks is crossfaded over `MUTE_FADE_SEC` on
+ * every track so a cut splice doesn't click, and each track's own muted
+ * spans are ducked to zero with the same fade at their edges.
  */
 export function buildPlaybackPlan(
   spans: TimelineSpan[],
   startSourceSec: number,
   endSourceSec: number,
-  filter: ViewFilter,
-  muteMarked: boolean,
-  markedIntervals: DisplayedInterval[],
+  tracks: TrackPlaybackInput[],
 ): PlaybackPlan {
   const chunks = buildChunks(spans, startSourceSec, endSourceSec);
   const last = chunks[chunks.length - 1];
   const totalSec = last ? last.playAt + (last.sourceEnd - last.sourceStart) : 0;
+  const spliceEvents = buildSpliceFadeEvents(chunks);
 
-  if (!muteMarked || filter === "hideUnmarked") {
-    return { chunks, gainEvents: [], totalSec };
-  }
-
-  const gainEvents =
-    filter === "all" ? buildDuckEvents(chunks, markedIntervals) : buildSpliceFadeEvents(chunks);
-
-  return { chunks, gainEvents: gainEvents.sort((a, b) => a.time - b.time), totalSec };
+  return {
+    chunks,
+    totalSec,
+    tracks: tracks.map((track) => {
+      const gain = track.gain ?? 1;
+      const events = [...spliceEvents, ...buildDuckEvents(chunks, track.mutedIntervals)]
+        .map((event) => ({ time: event.time, value: event.value * gain }))
+        .sort((a, b) => a.time - b.time);
+      return { gain, gainEvents: events };
+    }),
+  };
 }
 
 function buildChunks(spans: TimelineSpan[], startSourceSec: number, endSourceSec: number): PlaybackChunk[] {
@@ -76,14 +106,14 @@ function buildChunks(spans: TimelineSpan[], startSourceSec: number, endSourceSec
   return chunks;
 }
 
-/** Duck gain to 0 wherever a marked interval overlaps a chunk, fading at each edge. */
-function buildDuckEvents(chunks: PlaybackChunk[], markedIntervals: DisplayedInterval[]): GainEvent[] {
+/** Duck gain to 0 wherever a muted interval overlaps a chunk, fading at each edge. */
+function buildDuckEvents(chunks: PlaybackChunk[], mutedIntervals: DisplayedInterval[]): GainEvent[] {
   const events: GainEvent[] = [];
   for (const chunk of chunks) {
     const chunkLength = chunk.sourceEnd - chunk.sourceStart;
     const offset = chunk.playAt - chunk.sourceStart;
 
-    for (const region of markedIntervals) {
+    for (const region of mutedIntervals) {
       const start = Math.max(region.start, chunk.sourceStart);
       const end = Math.min(region.end, chunk.sourceEnd);
       if (end <= start) continue;
