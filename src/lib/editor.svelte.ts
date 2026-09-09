@@ -433,6 +433,14 @@ export class EditorState {
   /** Length of the collapsed timeline — the "kept" seconds `viewStartSec`/`viewDurationSec` are measured in. */
   readonly displayKeptDuration: number = $derived(keptDuration(this.timelineSpans));
 
+  /**
+   * Where the playhead sits on the edited timeline, with the cut time
+   * taken out — what the transport counts in, against
+   * `displayKeptDuration`. `playheadSec` itself stays in source time,
+   * since that's what the marks, IN/OUT and transcript are expressed in.
+   */
+  readonly playheadKeptSec: number = $derived(sourceToKept(this.timelineSpans, this.playheadSec));
+
   /** Cut candidates: where every track is detected-silent, minus what's already accepted or dismissed. */
   readonly cutSuggestionList: Range[] = $derived.by(() =>
     this.hasAudio

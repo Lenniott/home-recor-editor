@@ -15,10 +15,11 @@
     {editor.isPlaying ? "Pause" : "Play"}
   </button>
 
-  <div class="time">
-    <span class="current">{formatTime(editor.playheadSec)}</span>
+  <!-- Edited time: the cuts are taken out of both numbers, so this counts what you actually hear. -->
+  <div class="time" title="Position and length with the shared cuts removed">
+    <span class="current">{formatTime(editor.playheadKeptSec)}</span>
     <span class="sep">/</span>
-    <span class="duration">{formatTime(editor.durationSec)}</span>
+    <span class="duration">{formatTime(editor.displayKeptDuration)}</span>
   </div>
 
   <label class="loop">
