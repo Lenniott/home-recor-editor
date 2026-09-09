@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { encodeWav } from "./encodeWav";
 import {
   alignRenders,
   combineRenders,
@@ -149,5 +150,66 @@ describe("renderForExport", () => {
     // The shorter track's own audio ends where its recording did, minus the shared cut.
     expect(alignedShort[0][299]).toBe(1);
     expect(alignedShort[0][500]).toBe(0);
+  });
+});
+
+describe("separate exports", () => {
+  /** What `+page.svelte` writes per track for a Separate/Both export. */
+  function exportTracks(
+    tracks: { channels: Float32Array[]; muted: { start: number; end: number }[] }[],
+    sampleRate: number,
+    cuts: { start: number; end: number }[],
+  ): Uint8Array[] {
+    const renders = alignRenders(
+      tracks.map((track) => renderForExport(track.channels, sampleRate, track.muted, cuts)),
+    );
+    return renders.map((render) => encodeWav(render, sampleRate));
+  }
+
+  it("writes both tracks at the same sample rate and frame count, unequal sources included", () => {
+    const sampleRate = 100;
+    const [a, b] = exportTracks(
+      [
+        // 10s stereo, with its own silence; the other track never sees it.
+        {
+          channels: [new Float32Array(1000).fill(1), new Float32Array(1000).fill(1)],
+          muted: [{ start: 3, end: 5 }],
+        },
+        // 6s mono — its missing tail is simply silence.
+        { channels: [new Float32Array(600).fill(1)], muted: [] },
+      ],
+      sampleRate,
+      [{ start: 1, end: 2 }],
+    );
+
+    const headerA = new DataView(a.buffer, a.byteOffset, a.byteLength);
+    const headerB = new DataView(b.buffer, b.byteOffset, b.byteLength);
+
+    expect(headerA.getUint32(24, true)).toBe(sampleRate);
+    expect(headerB.getUint32(24, true)).toBe(sampleRate);
+    // Channel layouts are preserved per track, so compare frames, not bytes.
+    expect(headerA.getUint16(22, true)).toBe(2);
+    expect(headerB.getUint16(22, true)).toBe(1);
+    const framesA = headerA.getUint32(40, true) / headerA.getUint16(32, true);
+    const framesB = headerB.getUint32(40, true) / headerB.getUint16(32, true);
+    expect(framesA).toBe(900);
+    expect(framesB).toBe(framesA);
+  });
+
+  it("keeps the frame counts identical after repeated cuts", () => {
+    const sampleRate = 100;
+    const cuts = [
+      { start: 1, end: 2 },
+      { start: 4, end: 4.5 },
+      { start: 7, end: 9 },
+    ];
+    const renders = alignRenders([
+      renderForExport([new Float32Array(1000).fill(1)], sampleRate, [], cuts),
+      renderForExport([new Float32Array(650).fill(1)], sampleRate, [], cuts),
+    ]);
+
+    // 10s less 3.5s of cuts.
+    expect(frameCount(renders[0])).toBe(650);
+    expect(frameCount(renders[1])).toBe(frameCount(renders[0]));
   });
 });
