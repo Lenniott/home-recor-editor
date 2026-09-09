@@ -204,6 +204,14 @@
     editor.loadAudio(first.buffer, first.name, first.mono, first.path, first.sha256);
     for (const track of rest) editor.addTrack(track.buffer, track.name, track.mono, track.path, track.sha256);
     editor.applyProjectV2(project, projectPath);
+
+    if (loaded.length < project.tracks.length) {
+      // Say so loudly: the project is open but incomplete, and saving it
+      // from here (autosave included) writes it back without the track
+      // whose recording couldn't be found.
+      const missing = project.tracks[loaded.length];
+      loadError = `Couldn't open "${missing.source.name}" — the project is loaded without it. Use Open Project… to relink before saving, or that track's marks and transcript will be dropped on the next save.`;
+    }
   }
 
   /**
