@@ -1,7 +1,40 @@
-# Tauri + SvelteKit + TypeScript
+# Home Recor Editor
 
-This template should help get you started developing with Tauri, SvelteKit and TypeScript in Vite.
+A Tauri + Svelte desktop audio editor with waveform selection, silence detection, and local text-based editing.
 
-## Recommended IDE Setup
+## Development on Apple Silicon macOS
 
-[VS Code](https://code.visualstudio.com/) + [Svelte](https://marketplace.visualstudio.com/items?itemName=svelte.svelte-vscode) + [Tauri](https://marketplace.visualstudio.com/items?itemName=tauri-apps.tauri-vscode) + [rust-analyzer](https://marketplace.visualstudio.com/items?itemName=rust-lang.rust-analyzer).
+Install Node.js, Rust, Xcode Command Line Tools, and CMake, then run:
+
+```sh
+npm install
+npm run tauri dev
+```
+
+The Tauri development/build hooks compile the pinned **whisper.cpp v1.7.6** sidecar the first time. This requires internet access to download the checksum-verified source archive; later runs reuse the binary. The executable statically links whisper/ggml and embeds its Metal library, with only macOS system-library dependencies. The first version targets `aarch64-apple-darwin`.
+
+```sh
+npm run check
+npm test
+npm run tauri -- build --bundles app
+```
+
+`npm run build:whisper` rebuilds the engine when missing. Remove `src-tauri/binaries/whisper-cli-aarch64-apple-darwin` to force a rebuild. Engine binaries and build products are ignored by Git; the build hook recreates them for a clean checkout. The bundled engine license is in `src-tauri/binaries/whisper-LICENSE`.
+
+## Edit by text
+
+1. Open a recording and expand **Edit by text** below the waveform.
+2. Click **Download English model · 142 MB** once. The app downloads `base.en` over HTTPS, verifies its pinned checksum, and caches it under the app's cache directory. Cancelled or failed downloads are discarded.
+3. Click **Transcribe**. The current audio is converted to 16 kHz mono and processed locally. After model setup, no network connection is needed and no audio is uploaded.
+4. Click a word to select its audio and move the playhead to its start. The current word highlights as playback moves. Drag across text to update the audio selection immediately; click transcript whitespace to clear it. With the transcript focused, use arrow keys to move by word, Shift to extend, and Home/End to reach the first/last word.
+5. Use **Mark selection**, **Unmark selection**, or **M**. Escape clears selection; existing undo/redo and waveform controls continue to work.
+
+Word timestamps are approximate. Audition the range and adjust its edges in the waveform when needed. Marks follow the editor's existing edge-buffer settings. Selecting text shows the full timeline so hidden audio can be selected too.
+
+Transcripts are session-only. Opening another recording or applying an audio removal/mute clears them; click **Transcribe again** for updated timings. Saving a project still saves the audio marks, not the transcript. Text cannot be changed or deleted directly, and this version does not automatically find filler words.
+
+## Transcription implementation
+
+The Rust backend owns one cancellable job at a time. `transcription_model_status`, `download_transcription_model`, `start_transcription`, and `cancel_transcription` expose setup and processing. The start command accepts a binary WAV body with an `x-job-id` header; progress/completion arrives on `transcription-progress` with the matching job ID. Cancelled and outdated results never replace the active transcript. Temporary WAV/JSON files are removed after success, failure, or cancellation.
+
+The source archive is pinned by SHA-256 in `scripts/build-whisper.sh`. The model's SHA-1 is pinned to the value published in the upstream model manifest. Network transfers use the macOS system curl; model verification uses system shasum. See [whisper.cpp](https://github.com/ggml-org/whisper.cpp/tree/v1.7.6) for engine source and its experimental word-timestamp support.

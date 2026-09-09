@@ -9,6 +9,7 @@
   import { vadDetector } from "$lib/vadDetector";
   import Waveform from "$lib/components/Waveform.svelte";
   import SilenceControls from "$lib/components/SilenceControls.svelte";
+  import TranscriptPanel from "$lib/components/TranscriptPanel.svelte";
   import Transport from "$lib/components/Transport.svelte";
 
   // Spin up the VAD worker at app start rather than waiting for the first
@@ -165,9 +166,11 @@
       player.toggle();
     } else if (e.code === "Escape" && editor.hasSelection) {
       editor.clearSelection();
+      window.getSelection()?.removeAllRanges();
     } else if (key === "m" && !isFormField && editor.hasSelection) {
       e.preventDefault();
       editor.toggleSelectionMark();
+      window.getSelection()?.removeAllRanges();
       player.refreshIfPlaying();
     } else if (key === "]" && !isFormField) {
       e.preventDefault();
@@ -204,6 +207,8 @@
   <section class="stage">
     <Waveform />
   </section>
+
+  <TranscriptPanel />
 
   <footer class="transport-bar">
     <Transport />
