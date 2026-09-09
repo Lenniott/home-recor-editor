@@ -1,3 +1,6 @@
+mod transcription;
+use tauri::Manager;
+
 // Reads an audio file picked by the user (via the dialog plugin) as raw
 // bytes so the frontend can decode it with the Web Audio API. Kept as a
 // plain filesystem read — no fs-plugin scope needed since this is an
@@ -54,7 +57,9 @@ fn write_audio_file(request: tauri::ipc::Request<'_>) -> Result<(), String> {
         .to_str()
         .map_err(|err| err.to_string())?;
     match request.body() {
-        tauri::ipc::InvokeBody::Raw(bytes) => std::fs::write(path, bytes).map_err(|err| err.to_string()),
+        tauri::ipc::InvokeBody::Raw(bytes) => {
+            std::fs::write(path, bytes).map_err(|err| err.to_string())
+        }
         _ => Err("expected a raw binary body".to_string()),
     }
 }
@@ -62,9 +67,19 @@ fn write_audio_file(request: tauri::ipc::Request<'_>) -> Result<(), String> {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .manage(transcription::Jobs::default())
+        .on_window_event(|window, event| {
+            if matches!(event, tauri::WindowEvent::Destroyed) {
+                transcription::cancel_all(window.app_handle());
+            }
+        })
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
+            transcription::transcription_model_status,
+            transcription::download_transcription_model,
+            transcription::start_transcription,
+            transcription::cancel_transcription,
             read_audio_file,
             read_text_file,
             write_text_file,
