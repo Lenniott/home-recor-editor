@@ -2,6 +2,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const mocked = vi.hoisted(() => ({ invoke: vi.fn(), listener: null as null | ((event: { payload: unknown }) => void) }));
 vi.mock("@tauri-apps/api/core", () => ({ invoke: mocked.invoke }));
 vi.mock("@tauri-apps/api/event", () => ({ listen: vi.fn(async (_event, callback) => { mocked.listener = callback; return vi.fn(); }) }));
+vi.mock("./vadDetector", () => ({ vadDetector: { detect: vi.fn(async () => [{start:0,end:10}]) } }));
+import { vadDetector } from "./vadDetector";
 import { Transcription } from "./transcription.svelte";
 import { EditorState } from "./editor.svelte";
 import { selectedWordRange } from "./transcript";
@@ -10,6 +12,7 @@ const audio = () => ({ duration: 10, sampleRate: 16000, length: 160000, numberOf
 const result = { transcription: [{ text: " hello", offsets: { from: 1000, to: 2000 } }] };
 function event(jobId: string, phase: string, extra = {}) { mocked.listener?.({ payload: { jobId, phase, percent: null, error: null, result: null, ...extra } }); }
 beforeEach(() => {
+  vi.mocked(vadDetector.detect).mockReset().mockResolvedValue([{start:0,end:10}]);
   mocked.invoke.mockReset().mockResolvedValue(true);
   vi.stubGlobal("Worker", class {
     onmessage?: (event: unknown) => void;
@@ -64,6 +67,7 @@ describe("transcription lifecycle", () => {
     });
     const state = new Transcription(); await state.init(); state.setAudio(audio());
     const pending = state.transcribe();
+    await vi.waitFor(() => expect(complete).toBeTypeOf("function"));
     await state.cancel(); complete(audio()); await pending;
     expect(state.busy).toBe(false);
     expect(mocked.invoke.mock.calls.some(c => c[0] === "start_transcription")).toBe(false);
@@ -131,5 +135,42 @@ describe("text ranges in the real editor", () => {
     editor.undo(); expect(editor.rawMarkers).toEqual([{ start: 1, end: 3 }]);
     editor.redo(); expect(editor.rawMarkers).toEqual([{ start: 1, end: 4 }]);
     editor.setSelection(2, 3); editor.unmarkSelection(); expect(editor.rawMarkers).toEqual([{ start: 1, end: 2 }, { start: 3, end: 4 }]);
+  });
+});
+
+describe("VAD gating", () => {
+  it("reuses the track's existing mono analysis instead of copying the full recording", async () => {
+    const analysis = new Float32Array(160000);
+    const state = new Transcription(); await state.init(); state.setAudio(audio(), analysis);
+    await state.transcribe();
+    expect(vi.mocked(vadDetector.detect).mock.calls[0][0]).toBe(analysis);
+  });
+
+  it("never invokes Whisper when VAD finds no speech", async () => {
+    vi.mocked(vadDetector.detect).mockResolvedValue([]);
+    const state = new Transcription(); await state.init(); state.setAudio(audio());
+    await state.transcribe();
+    expect(state.completed).toBe(true);
+    expect(state.words).toEqual([]);
+    expect(mocked.invoke.mock.calls.some(c => c[0] === "start_transcription")).toBe(false);
+  });
+  it("maps recognizer timestamps back through removed non-speaking audio", async () => {
+    vi.mocked(vadDetector.detect).mockResolvedValue([{start:5,end:8}]);
+    const state = new Transcription(); await state.init(); state.setAudio(audio());
+    await state.transcribe();
+    const id = mocked.invoke.mock.calls.find(c => c[0] === "start_transcription")![2].headers["x-job-id"];
+    event(id,"complete",{result:{transcription:[{text:"hello",offsets:{from:1000,to:1500}}]}});
+    expect(state.words).toEqual([{text:"hello",start:5.8,end:6.3}]);
+  });
+  it("stops a VAD scan on cancel without starting transcription", async () => {
+    let finish!: (value: {start:number;end:number}[]) => void;
+    vi.mocked(vadDetector.detect).mockImplementation(() => new Promise(resolve => finish = resolve));
+    const state = new Transcription(); await state.init(); state.setAudio(audio());
+    const job = state.transcribe();
+    const signal = vi.mocked(vadDetector.detect).mock.calls[0][4]!;
+    await state.cancel();
+    expect(signal.aborted).toBe(true);
+    finish([{start:0,end:10}]); await job;
+    expect(mocked.invoke.mock.calls.some(c => c[0] === "start_transcription")).toBe(false);
   });
 });

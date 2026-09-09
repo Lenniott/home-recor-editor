@@ -1,10 +1,14 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { vadDetector } from "./vadDetector";
+import { mixToMono } from "./audio/decode";
+import { speechWindows, restoreSpeechTimes, type SpeechWindow, type SpeechSpan } from "./audio/speechTimeline";
 import { parseTranscript, type TranscriptWord } from "./transcript";
 
 interface Progress { jobId: string; phase: string; percent: number | null; result: unknown; error: string | null }
 
 export class Transcription {
+  onSettled: ((words: TranscriptWord[] | null) => void) | null = null;
   words: TranscriptWord[] = $state([]);
   phase = $state("idle");
   percent: number | null = $state(null);
@@ -18,6 +22,11 @@ export class Transcription {
   private jobId: string | null = null;
   private kind: "download" | "transcribe" | null = null;
   private audio: AudioBuffer | null = null;
+  private analysisSamples: Float32Array | null = null;
+  private vadAbort: AbortController | null = null;
+  private windows: SpeechWindow[] = [];
+  private speech: SpeechSpan[] = [];
+  private transcriptionDuration = 0;
   private unlisten: UnlistenFn | null = null;
   private disposed = false;
   private encodingWorker: Worker | null = null;
@@ -38,11 +47,12 @@ export class Transcription {
     finally { this.modelChecked = true; }
   }
 
-  setAudio(audio: AudioBuffer | null): void {
-    if (audio === this.audio) return;
+  setAudio(audio: AudioBuffer | null, analysisSamples: Float32Array | null = null): void {
+    if (audio === this.audio && analysisSamples === this.analysisSamples) return;
     this.invalidated = this.audio !== null;
     if (this.kind === "transcribe") void this.cancel();
     this.audio = audio;
+    this.analysisSamples = analysisSamples;
     this.words = [];
     this.completed = false;
     this.error = null;
@@ -71,7 +81,7 @@ export class Transcription {
       if (!cancelled && event.phase === "complete") {
         if (this.kind === "download") this.modelReady = true;
         else {
-          this.words = parseTranscript(event.result, this.audio?.duration ?? 0);
+          this.words = restoreSpeechTimes(parseTranscript(event.result, this.transcriptionDuration), this.windows, this.speech);
           this.completed = true;
           this.invalidated = false;
         }
@@ -80,6 +90,9 @@ export class Transcription {
       this.phase = this.error ? "error" : "idle";
       this.jobId = null;
       this.kind = null;
+      this.percent = event.percent;
+      this.onSettled?.(!cancelled && event.phase === "complete" && this.completed ? this.words : null);
+      return;
     } else this.phase = event.phase;
     this.percent = event.percent;
   }
@@ -95,7 +108,7 @@ export class Transcription {
     catch (e) { this.fail(e); }
   }
 
-  async transcribe(): Promise<void> {
+  async transcribe(settings: {positiveSpeechThreshold: number} = {positiveSpeechThreshold: .5}): Promise<void> {
     const audio = this.audio;
     if (!audio || this.busy || !this.modelReady) return;
     const id = crypto.randomUUID();
@@ -105,19 +118,41 @@ export class Transcription {
     this.percent = null;
     this.error = null;
     try {
-      // Web Audio resamples off the main thread; explicit averaging matches the editor's mono analysis.
-      const context = new OfflineAudioContext(1, Math.max(1, Math.ceil(audio.duration * 16000)), 16000);
-      const source = context.createBufferSource();
-      source.buffer = audio;
-      const split = context.createChannelSplitter(audio.numberOfChannels);
-      source.connect(split);
-      for (let i = 0; i < audio.numberOfChannels; i++) {
-        const gain = context.createGain();
-        gain.gain.value = 1 / audio.numberOfChannels;
-        split.connect(gain, i);
-        gain.connect(context.destination);
+      this.phase = "detecting";
+      this.vadAbort = new AbortController();
+      // TrackState already owns a mono analysis buffer for its waveform and
+      // cleanup pass. Reuse it here. Creating another full-length mono copy
+      // immediately before the worker's structured-clone copy can exhaust
+      // WebKit's process memory on long podcast recordings and reload the UI.
+      const analysisSamples = this.analysisSamples ?? mixToMono(audio);
+      const speech = await vadDetector.detect(analysisSamples, audio.sampleRate, {
+        positiveSpeechThreshold: settings.positiveSpeechThreshold,
+        negativeSpeechThreshold: Math.max(0, settings.positiveSpeechThreshold-.15),
+      }, fraction => { if (this.jobId === id) this.percent = fraction*100; }, this.vadAbort.signal);
+      if (this.jobId !== id || this.audio !== audio || this.disposed) return;
+      this.speech = speech;
+      this.windows = speechWindows(speech, audio.duration);
+      this.transcriptionDuration = this.windows.reduce((sum, span) => sum+span.end-span.start,0);
+      if (!this.windows.length) {
+        this.receive({jobId:id,phase:"complete",percent:100,result:{transcription:[]},error:null});
+        return;
       }
-      source.start();
+      this.phase = "preparing";
+      this.percent = null;
+      // Schedule only padded speech windows; the originals and editor cut map stay untouched.
+      const context = new OfflineAudioContext(1, Math.max(1, Math.round(this.transcriptionDuration*16000)),16000);
+      for (const span of this.windows) {
+        const source = context.createBufferSource();
+        source.buffer = audio;
+        const split = context.createChannelSplitter(audio.numberOfChannels);
+        source.connect(split);
+        for (let i = 0; i < audio.numberOfChannels; i++) {
+          const gain = context.createGain();
+          gain.gain.value = 1/audio.numberOfChannels;
+          split.connect(gain,i); gain.connect(context.destination);
+        }
+        source.start(span.offset,span.start,span.end-span.start);
+      }
       const mono = await context.startRendering();
       if (this.jobId !== id || this.audio !== audio || this.disposed) return;
       const bytes = await this.encode(mono.getChannelData(0));
@@ -134,7 +169,9 @@ export class Transcription {
   async cancel(): Promise<void> {
     const id = this.jobId;
     if (!id) return;
-    if (this.phase === "preparing") {
+    if (this.phase === "preparing" || this.phase === "detecting") {
+      this.vadAbort?.abort();
+      this.vadAbort = null;
       this.jobId = null;
       this.kind = null;
       this.phase = "idle";
@@ -142,6 +179,7 @@ export class Transcription {
       this.encodingWorker = null;
       this.rejectEncoding?.(new Error("Cancelled"));
       this.rejectEncoding = null;
+      this.onSettled?.(null);
       return;
     }
     this.phase = "cancelling";
@@ -175,6 +213,7 @@ export class Transcription {
     this.phase = "error";
     this.jobId = null;
     this.kind = null;
+    this.onSettled?.(null);
   }
 
   dispose(): void {
