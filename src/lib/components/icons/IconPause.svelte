@@ -1,6 +1,5 @@
 <script lang="ts">
-  let { size = 16, dir = "left" }: { size?: number; dir?: "left" | "right" } =
-    $props();
+  let { size = 16 }: { size?: number } = $props();
 </script>
 
 <svg
@@ -16,15 +15,7 @@
   aria-hidden="true"
   focusable="false"
 >
-  {#if dir === "left"}
-    <path
-      d="M15 18L9 12L15 6"
-    />
-  {:else}
-    <path
-      d="M9 18L15 12L9 6"
-    />
-  {/if}
+  <path d="M7 5H10V19H7V5ZM14 5H17V19H14V5Z" />
 </svg>
 
 <style>

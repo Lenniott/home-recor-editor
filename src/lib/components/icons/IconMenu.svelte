@@ -16,15 +16,9 @@
   aria-hidden="true"
   focusable="false"
 >
-  {#if dir === "left"}
-    <path
-      d="M15 18L9 12L15 6"
-    />
-  {:else}
-    <path
-      d="M9 18L15 12L9 6"
-    />
-  {/if}
+  <path
+    d="M3 12H21M3 6H21M3 18H21"
+  />
 </svg>
 
 <style>
