@@ -19,6 +19,8 @@
     onImport,
     onExport,
     onExportReset,
+    open = $bindable(false),
+    showTrigger = true,
   }: {
     isLoading?: boolean;
     isSaving?: boolean;
@@ -35,9 +37,9 @@
     onImport: () => void;
     onExport: (choice: ExportChoice) => Promise<void>;
     onExportReset: () => void;
+    open?: boolean;
+    showTrigger?: boolean;
   } = $props();
-
-  let menuOpen = $state(false);
   let exportDialog: HTMLDialogElement | undefined = $state();
   let root: HTMLElement | undefined = $state();
   let awaitingDestination = $state(false);
@@ -45,7 +47,7 @@
   const showExportProgress = $derived(isExporting || !!exportStage);
 
   function closeMenu(): void {
-    menuOpen = false;
+    open = false;
   }
 
   function run(action: () => void): void {
@@ -83,11 +85,11 @@
   }
 
   function onWindowPointerDown(event: PointerEvent): void {
-    if (menuOpen && root && !root.contains(event.target as Node)) closeMenu();
+    if (open && root && !root.contains(event.target as Node)) closeMenu();
   }
 
   function onWindowKeydown(event: KeyboardEvent): void {
-    if (event.key === "Escape" && menuOpen) {
+    if (event.key === "Escape" && open) {
       closeMenu();
       event.preventDefault();
     }
@@ -100,17 +102,19 @@
 
 <svelte:window onpointerdown={onWindowPointerDown} onkeydown={onWindowKeydown} />
 
-<div class="file-menu" bind:this={root}>
-  <button
-    type="button"
-    class="file-toggle"
-    aria-haspopup="menu"
-    aria-expanded={menuOpen}
-    onclick={() => (menuOpen = !menuOpen)}
-  >
-    File
-  </button>
-  {#if menuOpen}
+<div class="file-menu" class:anchored={!showTrigger} bind:this={root}>
+  {#if showTrigger}
+    <button
+      type="button"
+      class="file-toggle"
+      aria-haspopup="menu"
+      aria-expanded={open}
+      onclick={() => (open = !open)}
+    >
+      File
+    </button>
+  {/if}
+  {#if open}
     <div class="menu" role="menu">
       <button type="button" role="menuitem" disabled={!canSave || isSaving} onclick={() => run(onSave)}>
         {isSaving ? "Saving…" : "Save"}
@@ -162,6 +166,15 @@
 <style>
   .file-menu {
     position: relative;
+  }
+  .file-menu.anchored {
+    position: absolute;
+    left: 0;
+    top: 100%;
+    z-index: 20;
+    width: 0;
+    height: 0;
+    overflow: visible;
   }
   .menu {
     position: absolute;

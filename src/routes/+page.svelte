@@ -28,22 +28,29 @@
     type PodcastProject,
   } from "$lib/projectV2";
   import { vadDetector } from "$lib/vadDetector";
+  import PageLayout from "$lib/components/baseline/PageLayout.svelte";
+  import Toolbar, {
+    type ViewMode,
+  } from "$lib/components/baseline/Toolbar.svelte";
+  import ViewPanel from "$lib/components/baseline/ViewPanel.svelte";
   import FileMenu, { type ExportChoice } from "$lib/components/FileMenu.svelte";
-  import IconChevron from "$lib/components/icons/IconChevron.svelte";
-  import IconRedo from "$lib/components/icons/IconRedo.svelte";
-  import IconUndo from "$lib/components/icons/IconUndo.svelte";
   import SelectionActions from "$lib/components/SelectionActions.svelte";
   import TimelineStack from "$lib/components/TimelineStack.svelte";
-  let tab = $state("transcript");
-  let paneOpen = $state(true);
+  let tab = $state("cleanup");
+  let paneOpen = $state(false);
+  let view: ViewMode = $state("both");
+  let menuOpen = $state(false);
   let windowWidth = $state(1180);
   $effect(() => {
     if (windowWidth < 900) paneOpen = false;
   });
+  $effect(() => {
+    if (editor.hasSelection)
+      editor.cutScopePreview = editor.markerAction === "cut";
+  });
   import CutLane from "$lib/components/CutLane.svelte";
   import SilenceControls from "$lib/components/SilenceControls.svelte";
   import TranscriptPanel from "$lib/components/TranscriptPanel.svelte";
-  import Transport from "$lib/components/Transport.svelte";
 
   // Spin up the VAD worker at app start rather than waiting for the first
   // Detect click — see vadDetector.warmUp() for why that timing matters.
@@ -673,6 +680,10 @@
     return err instanceof Error ? err.message : String(err);
   }
 
+  function clearNativeSelection(): void {
+    window.getSelection()?.removeAllRanges();
+  }
+
   function onKeydown(e: KeyboardEvent): void {
     const target = e.target as HTMLElement | null;
     const isFormField =
@@ -723,10 +734,12 @@
 
 <svelte:window bind:innerWidth={windowWidth} onkeydown={onKeydown} />
 
-<main class="app">
-  <header class="toolbar">
-    <div class="file-controls">
+<PageLayout asideOpen={paneOpen} asideOverlay={windowWidth < 900}>
+  {#snippet header()}
+    <div class="toolbar-slot">
       <FileMenu
+        bind:open={menuOpen}
+        showTrigger={false}
         {isLoading}
         {isSaving}
         {isExporting}
@@ -743,6 +756,146 @@
         onExport={startExport}
         onExportReset={resetExportUi}
       />
+      <Toolbar
+        bind:menuOpen
+        bind:markerType={editor.markerAction}
+        bind:view
+        bind:asideOpen={paneOpen}
+        canUndo={editor.canUndo}
+        canRedo={editor.canRedo}
+        canMark={editor.hasSelection}
+        canUnmark={editor.hasSelection && editor.actionOverlap !== "unmarked"}
+        canPlay={editor.hasAudio}
+        playing={editor.isPlaying}
+        currentSec={editor.playheadKeptSec}
+        durationSec={editor.displayKeptDuration}
+        preview={editor.preview === "edited"}
+        onplay={() => player.toggle()}
+        onpreview={() => {
+          editor.setPreview(
+            editor.preview === "edited" ? "original" : "edited",
+          );
+          player.refreshIfPlaying();
+        }}
+        onundo={() => {
+          editor.undo();
+          player.refreshIfPlaying();
+        }}
+        onredo={() => {
+          editor.redo();
+          player.refreshIfPlaying();
+        }}
+        onmark={() => {
+          editor.markAction();
+          clearNativeSelection();
+          player.refreshIfPlaying();
+        }}
+        onunmark={() => {
+          editor.unmarkAction();
+          clearNativeSelection();
+          player.refreshIfPlaying();
+        }}
+        hasSelection={editor.hasSelection}
+        onclear={() => {
+          editor.clearSelection();
+          clearNativeSelection();
+        }}
+        canZoomIn={editor.hasAudio &&
+          editor.viewDurationSec >
+            Math.min(0.2, editor.displayKeptDuration) + 1e-6}
+        canZoomOut={editor.hasAudio &&
+          editor.viewDurationSec < editor.displayKeptDuration - 1e-6}
+        canFit={editor.hasAudio &&
+          editor.viewDurationSec < editor.displayKeptDuration - 1e-6}
+        onzoomin={() => editor.commitEdit(() => editor.zoomView(0.8))}
+        onzoomout={() => editor.commitEdit(() => editor.zoomView(1.25))}
+        onfit={() =>
+          editor.commitEdit(() =>
+            editor.setView(0, editor.displayKeptDuration),
+          )}
+      />
+    </div>
+  {/snippet}
+
+  {#snippet aside()}
+    <nav class="pane-tabs" aria-label="Editor panels">
+      {#each ["cleanup", "edits"] as name (name)}
+        <button class:active={tab === name} onclick={() => (tab = name)}
+          >{name}</button
+        >
+      {/each}
+    </nav>
+    <div class="pane-content" hidden={tab !== "cleanup"}>
+      <h2>Mark non-speaking audio</h2>
+      <p class="pane-hint">
+        Choose VAD plus the dB floor, or run the dB silence floor by itself. The
+        pass runs across all tracks. Silence gap also controls transcript
+        paragraph breaks.
+      </p>
+      <SilenceControls />
+    </div>
+    <div class="pane-content" hidden={tab !== "edits"}>
+      <h2>Review shared cuts</h2>
+      <p class="pane-hint">
+        Cut markers affect every track. Preview edits to hear the result; Export
+        applies them to new files.
+      </p>
+      <button
+        class="bulk-convert"
+        disabled={!editor.tracks.some(
+          (track) => track.markedIntervals.length > 0,
+        )}
+        onclick={() => {
+          editor.convertAllSilencesToCuts();
+          player.refreshIfPlaying();
+        }}
+        title="Every per-track silence marker becomes a shared cut across all tracks"
+        >Convert all silences to shared cuts</button
+      >
+      <p class="pane-hint compact">
+        This clears the silence markers and places their combined ranges in the
+        shared cut lane. Undo restores them.
+      </p>
+      <CutLane reviewOnly />
+      <h2>Marked cuts · {editor.cuts.length}</h2>
+      {#each editor.cuts as cut (`${cut.start}-${cut.end}`)}
+        <div class="edit-row">
+          <button onclick={() => player.audition(cut)}
+            >{cut.start.toFixed(1)} – {cut.end.toFixed(1)} s</button
+          >
+          <button
+            onclick={() => {
+              editor.restoreCut(cut);
+              player.refreshIfPlaying();
+            }}>Unmark</button
+          >
+        </div>
+      {/each}
+      {#each editor.tracks as track (track.id)}
+        <h2>{track.speaker} · {track.markedIntervals.length} silences</h2>
+        {#each track.markedIntervals as range (`${track.id}-${range.start}-${range.end}`)}
+          <div class="edit-row">
+            <button
+              onclick={() => {
+                editor.setActiveTrack(track.id);
+                player.audition(range);
+              }}>{range.start.toFixed(1)} – {range.end.toFixed(1)} s</button
+            >
+            <button
+              onclick={() => {
+                editor.setSelection(range.start, range.end, [track.id]);
+                editor.unmarkSelection();
+                player.refreshIfPlaying();
+              }}>Unmark</button
+            >
+          </div>
+        {/each}
+      {/each}
+    </div>
+  {/snippet}
+
+  {#snippet footer()}
+    <div class="file-status">
       <span class="filename"
         >{isLoading
           ? "Opening…"
@@ -761,139 +914,8 @@
         <span class="save-status">{exportStatus}</span>
       {/if}
     </div>
-    <Transport />
-  </header>
-
-  <div class="workspace">
-    <aside class:collapsed={!paneOpen}>
-      <nav class="pane-tabs" aria-label="Editor panels">
-        {#each ["transcript", "cleanup", "edits"] as name}
-          <button class:active={tab === name} onclick={() => (tab = name)}
-            >{name}</button
-          >
-        {/each}
-      </nav>
-      <div
-        class="pane-content transcript-content"
-        hidden={tab !== "transcript"}
-      >
-        <TranscriptPanel showSelectionActions={false} />
-      </div>
-      <div class="pane-content" hidden={tab !== "cleanup"}>
-        <h2>Mark non-speaking audio</h2>
-        <p class="pane-hint">
-          Choose VAD plus the dB floor, or run the dB silence floor by itself.
-          The pass runs across all tracks. Silence gap also controls transcript
-          paragraph breaks.
-        </p>
-        <SilenceControls />
-      </div>
-      <div class="pane-content" hidden={tab !== "edits"}>
-        <h2>Review shared cuts</h2>
-        <p class="pane-hint">
-          Cut markers affect every track. Preview edits to hear the result;
-          Export applies them to new files.
-        </p>
-        <button
-          class="bulk-convert"
-          disabled={!editor.tracks.some(
-            (track) => track.markedIntervals.length > 0,
-          )}
-          onclick={() => {
-            editor.convertAllSilencesToCuts();
-            player.refreshIfPlaying();
-          }}
-          title="Every per-track silence marker becomes a shared cut across all tracks"
-          >Convert all silences to shared cuts</button
-        >
-        <p class="pane-hint compact">
-          This clears the silence markers and places their combined ranges in
-          the shared cut lane. Undo restores them.
-        </p>
-        <CutLane reviewOnly />
-        <h2>Marked cuts · {editor.cuts.length}</h2>
-        {#each editor.cuts as cut}
-          <div class="edit-row">
-            <button onclick={() => player.audition(cut)}
-              >{cut.start.toFixed(1)} – {cut.end.toFixed(1)} s</button
-            >
-            <button
-              onclick={() => {
-                editor.restoreCut(cut);
-                player.refreshIfPlaying();
-              }}>Unmark</button
-            >
-          </div>
-        {/each}
-        {#each editor.tracks as track}
-          <h2>{track.speaker} · {track.markedIntervals.length} silences</h2>
-          {#each track.markedIntervals as range}
-            <div class="edit-row">
-              <button
-                onclick={() => {
-                  editor.setActiveTrack(track.id);
-                  player.audition(range);
-                }}>{range.start.toFixed(1)} – {range.end.toFixed(1)} s</button
-              >
-              <button
-                onclick={() => {
-                  editor.setSelection(range.start, range.end, [track.id]);
-                  editor.unmarkSelection();
-                  player.refreshIfPlaying();
-                }}>Unmark</button
-              >
-            </div>
-          {/each}
-        {/each}
-      </div>
-    </aside>
-    <div class="timeline-workspace">
-      <div class="workspace-tools">
-        <button
-          class="with-icon"
-          onclick={() => (paneOpen = !paneOpen)}
-          aria-label="Toggle left pane"
-        >
-          <IconChevron dir={paneOpen ? "left" : "right"} />
-          Panels
-        </button>
-        <span
-          >Synced tracks · {editor.preview === "edited"
-            ? "Previewing edits"
-            : "Mark & review"}</span
-        >
-        <button
-          onclick={() => {
-            editor.setView(0, editor.displayKeptDuration);
-          }}>Fit recording</button
-        >
-        <button
-          class="icon-btn"
-          disabled={!editor.canUndo}
-          onclick={() => {
-            editor.undo();
-            player.refreshIfPlaying();
-          }}
-          aria-label="Undo"
-        >
-          <IconUndo />
-        </button>
-        <button
-          class="icon-btn"
-          disabled={!editor.canRedo}
-          onclick={() => {
-            editor.redo();
-            player.refreshIfPlaying();
-          }}
-          aria-label="Redo"
-        >
-          <IconRedo />
-        </button>
-      </div>
-      <TimelineStack />
-      <SelectionActions />
-    </div>
-  </div>
+    <SelectionActions />
+  {/snippet}
 
   {#if loadError}
     <p class="error">{loadError}</p>
@@ -901,160 +923,29 @@
   {#if exportError}
     <p class="error">Export failed: {exportError}</p>
   {/if}
-</main>
+
+  <ViewPanel title="Transcript" open={view !== "audio"} collapsible={false}>
+    <TranscriptPanel showSelectionActions={false} />
+  </ViewPanel>
+  <ViewPanel title="Audio" open={view !== "transcript"} collapsible={false}>
+    <TimelineStack />
+  </ViewPanel>
+</PageLayout>
 
 <style>
-  .workspace {
-    position: relative;
-    display: flex;
-    flex: 1;
-    min-height: 0;
-    gap: 0.75rem;
-  }
-  aside {
-    width: 330px;
-    min-width: 265px;
-    max-width: 45%;
-    resize: horizontal;
-    overflow: hidden;
-    display: flex;
-    flex-direction: column;
-    background: var(--panel);
-    border: 1px solid var(--panel-line);
-    border-radius: 6px;
-  }
-  aside.collapsed {
-    display: none;
-  }
-  .pane-tabs {
-    display: flex;
-    padding: 0.5rem;
-    gap: 0.25rem;
-    border-bottom: 1px solid var(--panel-line);
-  }
-  .pane-tabs button {
-    flex: 1;
-    text-transform: capitalize;
-    font-size: 0.75rem;
-  }
-  .pane-tabs button.active {
-    background: var(--amber);
-    color: var(--chassis);
-  }
-  .pane-content {
-    flex: 1;
-    min-height: 0;
-    overflow: auto;
-    padding: 1rem;
-  }
-  .pane-content[hidden] {
-    display: none;
-  }
-  .transcript-content {
-    padding: 0;
-    display: flex;
-    overflow: hidden;
-  }
-  h2 {
-    font-size: 0.85rem;
-    margin: 0.5rem 0 1rem;
-  }
-  .pane-hint {
-    font-size: 0.75rem;
-    line-height: 1.6;
-    color: var(--cream-dim);
-    margin-bottom: 1.5rem;
-  }
-  .timeline-workspace {
-    flex: 1;
-    min-width: 0;
-    display: flex;
-    flex-direction: column;
-    overflow: hidden;
-  }
-  .workspace-tools {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-  }
-  .workspace-tools span {
-    flex: 1;
-    font-size: 0.7rem;
-    color: var(--cream-dim);
-  }
-  .workspace-tools button {
-    font-size: 0.7rem;
-  }
-  .with-icon,
-  .icon-btn {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    gap: 0.35rem;
-  }
-  .icon-btn {
-    padding: 0.4rem;
-  }
-  .edit-row {
-    display: flex;
-    justify-content: space-between;
-    gap: 0.5rem;
-    margin-bottom: 0.4rem;
-  }
-  .edit-row button {
-    font-size: 0.7rem;
-  }
-  .bulk-convert {
-    width: 100%;
-    margin-bottom: 0.5rem;
-  }
-  .pane-hint.compact {
-    margin-bottom: 1rem;
-    line-height: 1.4;
-  }
-  @media (max-width: 1100px) {
-    aside {
-      width: 280px;
-      min-width: 245px;
-    }
-    .filename {
-      display: none;
-    }
-  }
-  @media (max-width: 900px) {
-    aside:not(.collapsed) {
-      position: absolute;
-      top: 48px;
-      bottom: 0;
-      left: 0;
-      z-index: 15;
-      width: 300px;
-      max-width: 80%;
-      box-shadow: 0 8px 30px #0009;
-    }
-  }
-
-  .toolbar {
-    display: flex;
-    flex-direction: row;
-    gap: 0.75rem;
-    align-items: center;
-    justify-content: space-between;
-  }
-
-  .app {
-    display: flex;
-    flex-direction: column;
-    height: 100vh;
-    padding: 1rem;
-    gap: 0.75rem;
-  }
-
-  .file-controls {
+  .toolbar-slot,
+  .file-status {
     display: flex;
     flex-wrap: wrap;
     align-items: center;
     gap: 0.5rem;
+    min-width: 0;
+  }
+
+  .toolbar-slot {
+    position: relative;
+    flex: 1;
+    flex-wrap: nowrap;
   }
 
   .filename {
@@ -1075,21 +966,79 @@
     color: var(--in-color);
   }
 
-  .transport-bar {
-    padding: 0.85rem 1rem;
-    background: var(--panel);
-    border: 1px solid var(--panel-line);
-    border-bottom: 1px solid #171310;
-    border-radius: 6px;
+  .pane-tabs {
+    display: flex;
+    gap: 0.25rem;
+    padding: 0.65rem 0.75rem 0;
+  }
+
+  .pane-tabs button {
+    flex: 1;
+    text-transform: capitalize;
+    font-size: 0.75rem;
+  }
+
+  .pane-tabs button.active {
+    background: var(--amber);
+    color: var(--chassis);
+  }
+
+  .pane-content {
+    flex: 1;
+    min-height: 0;
+    overflow: auto;
+    padding: 1rem;
+  }
+
+  .pane-content[hidden] {
+    display: none;
+  }
+
+  h2 {
+    font-size: 0.85rem;
+    margin: 0.5rem 0 1rem;
+  }
+
+  .pane-hint {
+    font-size: 0.75rem;
+    line-height: 1.6;
+    color: var(--cream-dim);
+    margin-bottom: 1.5rem;
+  }
+
+  .pane-hint.compact {
+    margin-bottom: 1rem;
+    line-height: 1.4;
+  }
+
+  .edit-row {
+    display: flex;
+    justify-content: space-between;
+    gap: 0.5rem;
+    margin-bottom: 0.4rem;
+  }
+
+  .edit-row button {
+    font-size: 0.7rem;
+  }
+
+  .bulk-convert {
+    width: 100%;
+    margin-bottom: 0.5rem;
   }
 
   .error {
     margin: 0;
     padding: 0.6rem 1rem;
     background: rgba(209, 73, 91, 0.15);
-    border: 1px solid var(--in-color);
-    border-radius: 6px;
+    border-bottom: 1px solid var(--in-color);
     color: var(--in-color);
     font-size: 0.85rem;
+  }
+
+  @media (max-width: 1100px) {
+    .filename {
+      display: none;
+    }
   }
 </style>

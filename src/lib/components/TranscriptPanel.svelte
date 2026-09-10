@@ -516,10 +516,7 @@
     height: 100%;
     flex: 1;
     min-height: 0;
-    border: 1px solid var(--panel-line);
-    border-radius: 6px;
-    background: var(--panel);
-    padding: 0.25rem 0.5rem;
+    gap: 0.5rem;
   }
   .heading {
     width: 100%;
@@ -551,7 +548,6 @@
     align-items: center;
     gap: 0.6rem;
     font-size: 0.8rem;
-    padding-top: 0.35rem;
   }
   p {
     font-size: 0.85rem;
@@ -565,8 +561,6 @@
     user-select: text;
     -webkit-user-select: text;
     cursor: text;
-    border-top: 1px solid var(--panel-line);
-    padding: 0.3rem 0.15rem;
   }
   .speaker-label {
     display: block;

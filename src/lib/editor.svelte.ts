@@ -942,7 +942,7 @@ export class EditorState {
     });
   }
 
-  /** Toggle the transport loop-between-IN/OUT flag as one undo step (see `Transport.svelte`). */
+  /** Toggle the transport loop-between-IN/OUT flag as one undo step. */
   setLoopInOut(loopInOut: boolean): void {
     this.commitEdit(() => {
       this.loopInOut = loopInOut;
