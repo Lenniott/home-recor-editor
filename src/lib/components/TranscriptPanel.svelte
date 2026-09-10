@@ -518,30 +518,6 @@
     min-height: 0;
     gap: 0.5rem;
   }
-  .heading {
-    width: 100%;
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    border: 0;
-    background: transparent;
-    padding: 0.65rem 1rem;
-    text-align: left;
-  }
-  .subtitle,
-  .hint {
-    color: var(--cream-dim);
-    font-size: 0.75rem;
-  }
-  #transcript-body:not([hidden]) {
-    display: flex;
-    flex-direction: column;
-    min-height: 0;
-    flex: 1;
-  }
-  #transcript-body {
-    padding: 0 1rem 0.65rem;
-  }
   .actions {
     display: flex;
     flex-wrap: wrap;
@@ -609,9 +585,6 @@
     white-space: pre-wrap;
     max-height: 5rem;
     overflow: auto;
-  }
-  .privacy {
-    margin-bottom: 0;
   }
   progress {
     width: 5rem;
