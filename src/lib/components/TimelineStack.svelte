@@ -6,6 +6,8 @@
   import TimelineRuler from "./TimelineRuler.svelte";
   import TrackLane from "./TrackLane.svelte";
 
+  let { compact = false }: { compact?: boolean } = $props();
+
   /**
    * The arrange area: ruler, shared cuts, and every track lane. Wheel
    * pan/zoom is owned here so it works over the ruler, cut strip, lane
@@ -59,7 +61,7 @@
   }
 
   function onWheel(event: WheelEvent): void {
-    if (!editor.hasAudio) return;
+    if (compact || !editor.hasAudio) return;
     const lane = (event.currentTarget as HTMLElement).querySelector<HTMLElement>("[data-timeline-lane]");
     if (!lane) return;
     event.preventDefault();
@@ -93,16 +95,20 @@
   }
 </script>
 
-<section class="stage" {@attach attachWheel}>
-  <TimelineRuler />
+<section class="stage" class:compact {@attach attachWheel}>
+  {#if !compact}
+    <TimelineRuler />
+  {/if}
   {#if editor.tracks.length === 0}
     <div class="empty">
       <p>Start with your speaker recordings</p>
       <p class="hint">Import one or two synced audio files to begin cleanup.</p>
     </div>
   {:else}
-    <CutLane stripOnly />
-    {#each editor.tracks as track (track.id)}<TrackLane {track} />{/each}
+    {#if !compact}
+      <CutLane stripOnly />
+    {/if}
+    {#each editor.tracks as track (track.id)}<TrackLane {track} {compact} />{/each}
   {/if}
 </section>
 
@@ -137,5 +143,20 @@
   .empty .hint {
     font-size: 0.8rem;
     opacity: 0.6;
+  }
+
+  .compact {
+    padding: 0.4rem 0 0;
+    gap: 0.3rem;
+    flex: 0 0 auto;
+  }
+
+  .compact .empty {
+    min-height: 2.4rem;
+    padding: 0.35rem;
+  }
+
+  .compact .empty .hint {
+    display: none;
   }
 </style>

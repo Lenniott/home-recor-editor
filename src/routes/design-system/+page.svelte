@@ -66,7 +66,7 @@
   <h2>Page layout</h2>
   <p>
     Stage column: header and view panels. Aside is full-height on the right, tabs at its top.
-    Toolbar view buttons show both panels, transcript only, or audio only.
+    Toolbar view buttons show both panels, or one large panel with the other as a caption / trim strip.
   </p>
   <div class="specimen" aria-label="Page layout specimen">
     <PageLayout embedded asideOpen={specimenAside}>
@@ -92,15 +92,21 @@
         title="Transcript"
         open={toolView !== "audio"}
         collapsible={false}
+        onexpand={() => (toolView = "transcript")}
       >
-        <p class="specimen-copy">Transcript track</p>
+        <p class="specimen-copy">
+          {toolView === "audio" ? "Caption · current words" : "Transcript track"}
+        </p>
       </ViewPanel>
       <ViewPanel
         title="Audio"
         open={toolView !== "transcript"}
         collapsible={false}
+        onexpand={() => (toolView = "audio")}
       >
-        <p class="specimen-copy">Audio track</p>
+        <p class="specimen-copy">
+          {toolView === "transcript" ? "Trim strip · waveforms" : "Audio track"}
+        </p>
       </ViewPanel>
     </PageLayout>
   </div>

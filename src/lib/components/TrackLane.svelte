@@ -9,7 +9,8 @@
    * and whether it's the lane the mark/detect controls are pointed at.
    * The waveform itself shares the project's timeline — see `Waveform.svelte`.
    */
-  let { track }: { track: TrackState } = $props();
+  let { track, compact = false }: { track: TrackState; compact?: boolean } =
+    $props();
 
   let laneHeight = $state(0);
   let waveformZoomDb = $state(0);
@@ -49,53 +50,59 @@
   }
 </script>
 
-<div class="lane" data-track-lane={track.id} class:active={isActive}>
+<div class="lane" class:compact data-track-lane={track.id} class:active={isActive}>
   <div class="lane-label">
-    <button
-      type="button"
-      class="activate"
-      class:active={isActive}
-      aria-pressed={isActive}
-      onclick={() => editor.setActiveTrack(track.id)}
-      title="Point the silence controls at this track"
-    >
-      <IconRadio on={isActive} size={12} />
-      {isActive ? "Editing" : "Edit"}
-    </button>
-    <input
-      class="speaker"
-      value={track.speaker}
-      onchange={(e) => editor.setSpeaker(track, (e.currentTarget as HTMLInputElement).value.trim() || track.speaker)}
-      aria-label="Speaker name"
-    />
-    <span class="file" title={track.fileName ?? ""}>{track.fileName ?? "No recording"}</span>
-    <span class="meta">{markedCount} silence{markedCount === 1 ? "" : "s"}</span>
-    {#if editor.tracks.length > 1}
-      <button type="button" class="remove" onclick={remove} title="Remove this track">Remove</button>
+    {#if compact}
+      <span class="speaker-name">{track.speaker}</span>
+    {:else}
+      <button
+        type="button"
+        class="activate"
+        class:active={isActive}
+        aria-pressed={isActive}
+        onclick={() => editor.setActiveTrack(track.id)}
+        title="Point the silence controls at this track"
+      >
+        <IconRadio on={isActive} size={12} />
+        {isActive ? "Editing" : "Edit"}
+      </button>
+      <input
+        class="speaker"
+        value={track.speaker}
+        onchange={(e) => editor.setSpeaker(track, (e.currentTarget as HTMLInputElement).value.trim() || track.speaker)}
+        aria-label="Speaker name"
+      />
+      <span class="file" title={track.fileName ?? ""}>{track.fileName ?? "No recording"}</span>
+      <span class="meta">{markedCount} silence{markedCount === 1 ? "" : "s"}</span>
+      {#if editor.tracks.length > 1}
+        <button type="button" class="remove" onclick={remove} title="Remove this track">Remove</button>
+      {/if}
     {/if}
   </div>
 
   <div class="lane-body" bind:clientHeight={laneHeight}>
-    <div
-      class="db-scale"
-      role="slider"
-      tabindex="0"
-      aria-label="Waveform vertical zoom"
-      aria-valuemin="0"
-      aria-valuemax="48"
-      aria-valuenow={waveformZoomDb}
-      title="Scroll to zoom quiet waveform detail · double-click to reset"
-      onwheel={zoomWaveform}
-      onkeydown={zoomWaveformKey}
-      ondblclick={() => waveformZoomDb = 0}
-    >
-      {#each [0, 6, 12] as offsetDb}
-        <span style:top="{dbY(offsetDb, true)}px">{dbLabel(offsetDb)}</span>
-        <span style:top="{dbY(offsetDb, false)}px">{dbLabel(offsetDb)}</span>
-      {/each}
-      <span class="zoom-readout">{waveformZoomDb ? `+${waveformZoomDb}` : "dB"}</span>
-    </div>
-    <Waveform {track} amplitudeZoomDb={waveformZoomDb} />
+    {#if !compact}
+      <div
+        class="db-scale"
+        role="slider"
+        tabindex="0"
+        aria-label="Waveform vertical zoom"
+        aria-valuemin="0"
+        aria-valuemax="48"
+        aria-valuenow={waveformZoomDb}
+        title="Scroll to zoom quiet waveform detail · double-click to reset"
+        onwheel={zoomWaveform}
+        onkeydown={zoomWaveformKey}
+        ondblclick={() => waveformZoomDb = 0}
+      >
+        {#each [0, 6, 12] as offsetDb}
+          <span style:top="{dbY(offsetDb, true)}px">{dbLabel(offsetDb)}</span>
+          <span style:top="{dbY(offsetDb, false)}px">{dbLabel(offsetDb)}</span>
+        {/each}
+        <span class="zoom-readout">{waveformZoomDb ? `+${waveformZoomDb}` : "dB"}</span>
+      </div>
+    {/if}
+    <Waveform {track} amplitudeZoomDb={waveformZoomDb} tweak={compact} />
   </div>
 </div>
 
@@ -170,5 +177,26 @@
   .lane-body {
     min-height: 0;
   }
+
+  .compact {
+    flex: 0 0 36px;
+    min-height: 36px;
+    gap: 0.4rem;
+    grid-template-columns: 4.5rem 1fr;
+  }
+
+  .compact .lane-label {
+    padding: 0;
+    justify-content: center;
+  }
+
+  .speaker-name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 0.7rem;
+    color: var(--cream-dim);
+  }
+
   @media(max-height: 650px) { .file, .meta, .remove { display: none; } }
 </style>

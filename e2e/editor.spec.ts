@@ -153,6 +153,22 @@ test('Cmd zoom and cut handles use the shared timeline', async ({ page }) => {
   await expect(page.locator('.mark.cut')).toHaveCount(1);
 });
 
+test('single-view layout keeps a compact tweak strip', async ({ page }) => {
+  await seed(page);
+  await page.getByRole('radiogroup', { name: 'View' }).getByRole('button', { name: 'Audio', exact: true }).click();
+  await expect(page.getByRole('region', { name: 'Transcript caption' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Transcribe all tracks', exact: true })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Seek on time ruler' })).toBeVisible();
+  await page.locator('[data-word="1"]').click();
+  expect(await page.evaluate(async () => (await import(performance.getEntriesByType('resource').map(r => r.name).find(name => name.includes('/src/lib/editor.svelte.ts')) ?? '/src/lib/editor.svelte.ts')).editor.playheadSec)).toBe(1.6);
+
+  await page.getByRole('radiogroup', { name: 'View' }).getByRole('button', { name: 'Transcript', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Transcribe all again', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Seek on time ruler' })).toHaveCount(0);
+  await expect(page.locator('[data-track-lane] canvas')).toHaveCount(2);
+  await expect(page.getByRole('slider', { name: 'Waveform vertical zoom' })).toHaveCount(0);
+});
+
 test('cleanup mode, deep dB scale, bulk conversion, and simplified transport', async ({ page }) => {
   await seed(page);
   await expect(page.getByText('Loop IN–OUT')).toHaveCount(0);

@@ -12,7 +12,11 @@
    * project state, so two lanes always line up; only the samples and the
    * silence marks are this track's own.
    */
-  let { track, amplitudeZoomDb = 0 }: { track: TrackState; amplitudeZoomDb?: number } = $props();
+  let {
+    track,
+    amplitudeZoomDb = 0,
+    tweak = false,
+  }: { track: TrackState; amplitudeZoomDb?: number; tweak?: boolean } = $props();
 
   let canvas: HTMLCanvasElement | undefined = $state();
   let width: number = $state(0);
@@ -26,6 +30,7 @@
   type DragTarget =
     | { type: "cut"; index: number; edge: "start" | "end" }
     | { type: "silence"; index: number; edge: "start" | "end" }
+    | { type: "trim"; edge: "start" | "end"; otherSec: number }
     | { type: "select"; anchorSec: number; startX: number; moved: boolean };
 
   let drag: DragTarget | null = null;
@@ -103,6 +108,20 @@
       if (Math.abs(x - sourceTimeToX(displayed.start, "start")) <= HIT_RADIUS) return { type: "silence", index: i, edge: "start" };
       if (Math.abs(x - sourceTimeToX(displayed.end, "end")) <= HIT_RADIUS) return { type: "silence", index: i, edge: "end" };
     }
+    return null;
+  }
+
+  function pendingRange(): { start: number; end: number } | null {
+    return editor.cutScopePreview ? editor.selectionRange : editor.selectionFor(track);
+  }
+
+  function selectionEdgeHit(x: number): DragTarget | null {
+    const range = pendingRange();
+    if (!range) return null;
+    if (Math.abs(x - sourceTimeToX(range.start, "start")) <= HIT_RADIUS)
+      return { type: "trim", edge: "start", otherSec: range.end };
+    if (Math.abs(x - sourceTimeToX(range.end, "end")) <= HIT_RADIUS)
+      return { type: "trim", edge: "end", otherSec: range.start };
     return null;
   }
 
@@ -452,7 +471,25 @@
     editor.beginEdit();
     // Touching a lane is what makes it the one the mark/detect controls apply to.
     editor.setActiveTrack(track.id);
-    drag = hitTest(e.offsetX) ?? { type: "select", anchorSec: resolveClickSourceSec(e.offsetX), startX: e.offsetX, moved: false };
+    if (tweak) {
+      drag =
+        selectionEdgeHit(e.offsetX) ??
+        {
+          type: "select",
+          anchorSec: resolveClickSourceSec(e.offsetX),
+          startX: e.offsetX,
+          moved: false,
+        };
+    } else {
+      drag =
+        hitTest(e.offsetX) ??
+        {
+          type: "select",
+          anchorSec: resolveClickSourceSec(e.offsetX),
+          startX: e.offsetX,
+          moved: false,
+        };
+    }
     canvas?.setPointerCapture(e.pointerId);
   }
 
@@ -460,9 +497,17 @@
     if (!drag || !track.hasAudio) return;
     if (drag.type === "cut") {
       editor.moveCut(drag.index, drag.edge, xToSourceTime(e.offsetX));
-    }
-    else if (drag.type === "silence") {
+    } else if (drag.type === "silence") {
       editor.moveMarker(track, drag.index, drag.edge, resolveSilenceDragSourceSec(drag.index, e.offsetX));
+    } else if (drag.type === "trim") {
+      const t = xToSourceTime(e.offsetX);
+      editor.setSelection(
+        drag.edge === "start" ? t : drag.otherSec,
+        drag.edge === "end" ? t : drag.otherSec,
+        [...editor.selectionTrackIds],
+      );
+    } else if (tweak) {
+      // Compact audio only trims an existing range; a drag on empty space is not a new select.
     } else {
       const t = xToSourceTime(e.offsetX);
       if (!drag.moved && Math.abs(e.offsetX - drag.startX) > CLICK_THRESHOLD_PX) drag.moved = true;
@@ -493,13 +538,15 @@
         } else if (silence) {
           editor.markerAction = "silence";
           editor.setSelection(silence.start,silence.end,[track.id]);
-        } else editor.clearSelection();
+        } else if (!tweak) editor.clearSelection();
       } else {
         // A real drag: auto-merge into an existing marked region if the
         // overlap is substantial, otherwise leave it pending for Mark/Unmark/Cut.
         editor.finishSelectionDrag(track);
         player.refreshIfPlaying();
       }
+    } else if (drag.type === "trim") {
+      player.refreshIfPlaying();
     } else if (drag.type === "cut") {
       editor.finishCutDrag();
       player.refreshIfPlaying();
@@ -520,6 +567,7 @@
 <div class="waveform" class:active={isActive} bind:clientWidth={width} bind:clientHeight={height}>
   {#if track.hasAudio}
     <canvas
+      class:tweak
       bind:this={canvas}
       style="width:{width}px;height:{height}px"
       onpointerdown={onPointerDown}
@@ -555,6 +603,10 @@
     display: block;
     cursor: crosshair;
     touch-action: none;
+  }
+
+  canvas.tweak {
+    cursor: default;
   }
 
   .empty {

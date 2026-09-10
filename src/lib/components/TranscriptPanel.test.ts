@@ -281,3 +281,32 @@ describe("transcript silence gap", () => {
     expect(target.querySelectorAll(".words p")).toHaveLength(2);
   });
 });
+
+describe("compact caption", () => {
+  beforeEach(async () => {
+    await unmount(component);
+    component = mount(TranscriptPanel, { target, props: { compact: true } });
+    flushSync();
+  });
+
+  it("hides transcribe chrome and keeps word seek", () => {
+    expect(target.querySelector(".transcript-panel")?.classList.contains("compact")).toBe(true);
+    expect(target.querySelector("[aria-label='Transcript caption']")).toBeTruthy();
+    expect(
+      Array.from(target.querySelectorAll("button")).some((b) =>
+        b.textContent?.includes("Transcribe"),
+      ),
+    ).toBe(false);
+    pointer(target.querySelector('[data-word="1"]')!);
+    expect(editor.playheadSec).toBe(1.6);
+    expect([editor.selectionStartSec, editor.selectionEndSec]).toEqual([1.6, 2.2]);
+  });
+
+  it("does not clear the range when clicking caption whitespace", () => {
+    pointer(target.querySelector('[data-word="1"]')!);
+    window.getSelection()?.removeAllRanges();
+    pointer(target.querySelector(".words")!);
+    expect(editor.hasSelection).toBe(true);
+    expect([editor.selectionStartSec, editor.selectionEndSec]).toEqual([1.6, 2.2]);
+  });
+});

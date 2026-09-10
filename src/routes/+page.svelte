@@ -924,11 +924,21 @@
     <p class="error">Export failed: {exportError}</p>
   {/if}
 
-  <ViewPanel title="Transcript" open={view !== "audio"} collapsible={false}>
-    <TranscriptPanel showSelectionActions={false} />
+  <ViewPanel
+    title="Transcript"
+    open={view !== "audio"}
+    collapsible={false}
+    onexpand={() => (view = "transcript")}
+  >
+    <TranscriptPanel compact={view === "audio"} showSelectionActions={false} />
   </ViewPanel>
-  <ViewPanel title="Audio" open={view !== "transcript"} collapsible={false}>
-    <TimelineStack />
+  <ViewPanel
+    title="Audio"
+    open={view !== "transcript"}
+    collapsible={false}
+    onexpand={() => (view = "audio")}
+  >
+    <TimelineStack compact={view === "transcript"} />
   </ViewPanel>
 </PageLayout>
 

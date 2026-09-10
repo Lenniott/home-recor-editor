@@ -6,10 +6,11 @@
   import { Transcription } from "$lib/transcription.svelte";
   import { selectedWordRange, wordsAtOffsets } from "$lib/transcript";
 
-  let { showSelectionActions = true }: { showSelectionActions?: boolean } =
-    $props();
+  let {
+    showSelectionActions = true,
+    compact = false,
+  }: { showSelectionActions?: boolean; compact?: boolean } = $props();
   const transcript = new Transcription();
-  let expanded = $state(true);
   let queue: TrackState[] = [];
   let running: TrackState | null = $state(null);
   let runningAudio: AudioBuffer | null = null;
@@ -95,6 +96,23 @@
     return indices;
   });
   const currentWord = $derived(currentWords.values().next().value ?? -1);
+  const followIndex = $derived.by(() => {
+    if (editor.hasSelection) {
+      for (let i = 0; i < words.length; i++) {
+        const word = words[i];
+        if (
+          editor.selectionRanges.some(
+            (range) =>
+              range.trackId === word.trackId &&
+              word.start < range.end &&
+              word.end > range.start,
+          )
+        )
+          return i;
+      }
+    }
+    return currentWord;
+  });
   const markedWords = $derived.by(() => {
     const marked = new Set<number>();
     editor.tracks.forEach((track, trackIndex) => {
@@ -163,21 +181,29 @@
     void transcript.init();
     return () => transcript.dispose();
   });
-  $effect(() => {
-    const index = currentWord;
-    if (expanded && editor.isPlaying && index >= 0) {
-      untrack(() => {
-        // Keep the spoken word visible without moving the text under a drag or edit selection.
-        if (dragging || editor.hasSelection || !root) return;
-        const word = root.querySelector<HTMLElement>(`[data-word="${index}"]`);
-        if (!word) return;
-        const bounds = root.getBoundingClientRect(),
-          box = word.getBoundingClientRect();
-        if (box.top < bounds.top || box.bottom > bounds.bottom) {
-          root.scrollTop += box.top - bounds.top - root.clientHeight / 2;
-        }
-      });
+  function keepWordInView(index: number): void {
+    if (!root || index < 0) return;
+    const word = root.querySelector<HTMLElement>(`[data-word="${index}"]`);
+    if (!word) return;
+    const bounds = root.getBoundingClientRect(),
+      box = word.getBoundingClientRect();
+    if (box.top < bounds.top || box.bottom > bounds.bottom) {
+      root.scrollTop += box.top - bounds.top - root.clientHeight / 2;
     }
+  }
+
+  $effect(() => {
+    const index = compact ? followIndex : currentWord;
+    if (index < 0) return;
+    untrack(() => {
+      if (compact) {
+        keepWordInView(index);
+        return;
+      }
+      // Keep the spoken word visible without moving the text under a drag or edit selection.
+      if (!editor.isPlaying || dragging || editor.hasSelection) return;
+      keepWordInView(index);
+    });
   });
 
   function select(
@@ -289,7 +315,7 @@
   }
 
   function selectionChange(): void {
-    if (!expanded || suppressNativeSelection) return;
+    if (suppressNativeSelection) return;
     if (readNativeSelection()) return;
     // Toolbar focus can collapse the browser selection before its Mark click runs.
     // Keep that pending audio range; only a collapse inside the transcript clears it.
@@ -329,7 +355,6 @@
     pointerMove(event);
     const wasDragging = dragging;
     dragging = false;
-    if (!expanded) return;
     const inside = event.target instanceof Node && root?.contains(event.target);
     if (!inside && !wasDragging) return;
     // A plain click wins even if the browser has not collapsed the previous native range yet.
@@ -344,7 +369,7 @@
       clearNativeSelection();
       select(event.shiftKey ? anchor : index, index, true, !event.shiftKey);
       root.focus({ preventScroll: true });
-    } else if (inside) {
+    } else if (inside && !compact) {
       clearNativeSelection();
       editor.clearSelection();
     }
@@ -393,7 +418,12 @@
 />
 <svelte:document onselectionchange={selectionChange} />
 
-<section class="transcript-panel" aria-label="Edit by text">
+<section
+  class="transcript-panel"
+  class:compact
+  aria-label={compact ? "Transcript caption" : "Edit by text"}
+>
+  {#if !compact}
   <div class="actions">
     {#if !transcript.modelChecked}
       <span>Checking speech model…</span>
@@ -462,8 +492,9 @@
       >
     {/if}
   </div>
+  {/if}
   {#if transcript.error}<p class="error" role="alert">
-      {transcript.error} Use the button above to retry.
+      {transcript.error}{#if !compact} Use the button above to retry.{/if}
     </p>{/if}
   {#if !editor.hasAudio}
     <p>Open a recording to edit its audio by selecting words.</p>
@@ -500,11 +531,15 @@
     </div>
   {:else if !transcript.busy}
     <p>
-      {transcript.completed
-        ? "No speech found. Try another recording or transcribe again."
-        : transcript.invalidated
-          ? "The audio changed. Transcribe again to get updated word timings."
-          : ""}
+      {#if compact}
+        {transcript.completed
+          ? "No speech found."
+          : "Transcribe in the transcript view."}
+      {:else if transcript.completed}
+        No speech found. Try another recording or transcribe again.
+      {:else if transcript.invalidated}
+        The audio changed. Transcribe again to get updated word timings.
+      {/if}
     </p>
   {/if}
 </section>
@@ -579,6 +614,39 @@
   .words:focus-visible {
     outline: 2px solid var(--amber);
     outline-offset: 2px;
+  }
+  .compact {
+    gap: 0;
+  }
+  .compact .words {
+    flex: 0 0 auto;
+    min-height: 0;
+    max-height: 2.6em;
+    overflow: hidden;
+    font-size: 0.85rem;
+  }
+  .compact .words p {
+    display: inline;
+    margin: 0;
+    line-height: 1.3;
+    font-size: inherit;
+  }
+  .compact .words p + p::before {
+    content: "  ·  ";
+    color: var(--cream-dim);
+  }
+  .compact .speaker-label {
+    display: none;
+  }
+  .compact .error {
+    max-height: 2.4em;
+    font-size: 0.75rem;
+    margin: 0.2rem 0 0;
+  }
+  .compact p {
+    margin: 0.25rem 0 0;
+    font-size: 0.75rem;
+    color: var(--cream-dim);
   }
   .error {
     color: var(--in-color);
