@@ -468,7 +468,7 @@
           ? ` ${Math.round(transcript.percent)}%`
           : ""}</span
       >
-      <Button variant="secondary" onclick={cancelAll} disabled={transcript.phase === "cancelling"}
+      <Button size="tool" variant="secondary" onclick={cancelAll} disabled={transcript.phase === "cancelling"}
         >Cancel</Button
       >
     {/if}
