@@ -1,63 +1,18 @@
 <script lang="ts">
   import { currentRegionNumber } from "../audio/markerNav";
-  import { editor, type ViewFilter } from "../editor.svelte";
+  import { editor } from "../editor.svelte";
   import { player } from "../player";
+  import Button from "./baseline/Button.svelte";
+  import IconCaret from "./icons/IconCaret.svelte";
 
-  const markerCount = $derived(editor.markers.filter((r) => r.displayed).length);
+  /**
+   * Per-speaker settings for the combined, all-track non-speaking pass.
+   */
+  const track = $derived(editor.activeTrack);
+  const markerCount = $derived(track ? track.markers.filter((r) => r.displayed).length : 0);
   const currentNumber = $derived(currentRegionNumber(editor.markedIntervals, editor.playheadSec));
-
-  let applyError: string | null = $state(null);
-
-  const VIEW_FILTERS: { value: ViewFilter; label: string }[] = [
-    { value: "all", label: "All" },
-    { value: "hideMarked", label: "Hide marked" },
-    { value: "hideUnmarked", label: "Hide unmarked" },
-  ];
-
-  function applyViewFilter(filter: ViewFilter): void {
-    editor.setViewFilter(filter);
-    player.refreshIfPlaying();
-  }
-
-  function toggleMuteMarked(): void {
-    editor.setMuteMarked(!editor.muteMarked);
-    player.refreshIfPlaying();
-  }
-
-  // Destructive: no undo copy of the buffer (see `EditorState.applySilenceMarked`),
-  // so a confirm() is the only safety net. Pause first so playback isn't
-  // scheduled against a buffer that's about to disappear.
-  function applySilence(): void {
-    if (!confirm("Apply silence to marked regions? This can't be undone — re-open the file to revert.")) return;
-    applyError = null;
-    player.pause();
-    try {
-      editor.applySilenceMarked();
-    } catch (err) {
-      applyError = err instanceof Error ? err.message : String(err);
-    }
-  }
-
-  function applyRemove(): void {
-    if (!confirm("Remove marked regions? This can't be undone — re-open the file to revert.")) return;
-    applyError = null;
-    player.pause();
-    try {
-      editor.applyRemoveMarked();
-    } catch (err) {
-      applyError = err instanceof Error ? err.message : String(err);
-    }
-  }
-
-  function markSelection(): void {
-    editor.markSelection();
-    player.refreshIfPlaying();
-  }
-
-  function unmarkSelection(): void {
-    editor.unmarkSelection();
-    player.refreshIfPlaying();
-  }
+  const detectingTrack = $derived(editor.tracks.find(t => t.isDetectingSilence));
+  let useVad = $state(true);
 
   function onThreshold(e: Event): void {
     editor.setPositiveSpeechThreshold(Number((e.currentTarget as HTMLInputElement).value));
@@ -86,17 +41,25 @@
     editor.endEdit();
   }
 
-  function formatTime(totalSeconds: number): string {
-    const s = Math.max(0, totalSeconds);
-    const minutes = Math.floor(s / 60);
-    const seconds = s - minutes * 60;
-    return `${minutes.toString().padStart(2, "0")}:${seconds.toFixed(1).padStart(4, "0")}`;
+  function runCleanup(): void {
+    if (useVad) void editor.detectAllTracks();
+    else editor.detectQuietAllTracks();
   }
+
 </script>
 
 <div class="silence-controls">
-  <label class="control">
-    <span class="label">VAD threshold</span>
+  <span class="scope" title="These settings belong to the selected speaker; detection runs every track">
+    Settings for <strong>{track?.speaker ?? "—"}</strong>
+  </span>
+
+  <label class="vad-option">
+    <input type="checkbox" bind:checked={useVad} disabled={!editor.hasAudio || editor.detectingAny} />
+    <span><strong>Use speech detection (VAD)</strong><small>Protect speech as well as checking the dB floor.</small></span>
+  </label>
+
+  {#if useVad}<label class="control">
+    <span class="label">Speech sensitivity</span>
     <input
       type="range"
       min="0.1"
@@ -110,10 +73,10 @@
       disabled={!editor.hasAudio}
     />
     <span class="value">{editor.settings.positiveSpeechThreshold.toFixed(2)}</span>
-  </label>
+  </label>{/if}
 
   <label class="control">
-    <span class="label">Min length</span>
+    <span class="label">Silence gap</span>
     <input
       type="range"
       min="100"
@@ -130,7 +93,7 @@
   </label>
 
   <label class="control">
-    <span class="label">Buffer</span>
+    <span class="label">Speech protection</span>
     <input
       type="range"
       min="0"
@@ -146,16 +109,21 @@
     <span class="value">{editor.settings.bufferMs} ms</span>
   </label>
 
-  <button class="detect" onclick={() => editor.runSilenceDetection()} disabled={!editor.hasAudio || editor.isDetectingSilence}>
-    {editor.isDetectingSilence ? `Detecting… ${Math.round(editor.detectionProgress * 100)}%` : "Detect Silence"}
-  </button>
+  <Button
+    class="detect"
+    variant="primary"
+    onclick={runCleanup}
+    disabled={!editor.hasAudio || editor.detectingAny}
+  >
+    {editor.detectingAny ? `Analyzing ${detectingTrack?.speaker} · ${Math.round((detectingTrack?.detectionProgress ?? 0) * 100)}%` : useVad ? "Run VAD + silence floor · all tracks" : "Run silence floor only · all tracks"}
+  </Button>
 
-  <label class="control" title="Loudness floor for a second, non-ML detection pass — catches quiet stretches VAD mistakes for speech (e.g. mic bleed)">
-    <span class="label">Quiet threshold</span>
+  <label class="control" title="Audio below this level is also marked, including very quiet speech. The combined pass uses speech detection and this quiet floor.">
+    <span class="label">Quiet floor</span>
     <input
       type="range"
       min="-60"
-      max="-15"
+      max="-6"
       step="1"
       value={editor.settings.quietThresholdDb}
       oninput={onQuietThreshold}
@@ -167,293 +135,56 @@
     <span class="value">{editor.settings.quietThresholdDb} dB</span>
   </label>
 
-  <button
-    class="detect"
-    onclick={() => editor.runQuietDetection()}
-    disabled={!editor.hasAudio}
-    title="Adds any audio quieter than the threshold above to your existing markers, without replacing them"
-  >
-    Detect Quiet Audio
-  </button>
-
   <span class="count">{markerCount} region{markerCount === 1 ? "" : "s"}</span>
 
   <div class="control marker-nav" role="group" aria-label="Marker region navigation">
-    <button
-      type="button"
-      class="nav-step"
-      onclick={() => player.goToAdjacentMarkedRegion("prev")}
-      disabled={markerCount === 0}
+    <Button
+      size="tool"
+      variant="secondary"
+      icon="left"
+      label={false}
+      tooltip
       title="Previous marked region (shortcut: [)"
       aria-label="Previous marked region"
-    >
-      ◀
-    </button>
-    <span class="nav-readout">{currentNumber ?? "–"} / {markerCount}</span>
-    <button
-      type="button"
-      class="nav-step"
-      onclick={() => player.goToAdjacentMarkedRegion("next")}
+      onclick={() => player.goToAdjacentMarkedRegion("prev")}
       disabled={markerCount === 0}
+    >
+      {#snippet glyph()}<IconCaret dir="left" />{/snippet}
+    </Button>
+    <span class="nav-readout">{currentNumber ?? "–"} / {markerCount}</span>
+    <Button
+      size="tool"
+      variant="secondary"
+      icon="left"
+      label={false}
+      tooltip
       title="Next marked region (shortcut: ])"
       aria-label="Next marked region"
+      onclick={() => player.goToAdjacentMarkedRegion("next")}
+      disabled={markerCount === 0}
     >
-      ▶
-    </button>
+      {#snippet glyph()}<IconCaret dir="right" />{/snippet}
+    </Button>
   </div>
 
-  <div class="control view-filter">
-    <span class="label">View</span>
-    <div class="segmented" role="group" aria-label="Timeline view filter">
-      {#each VIEW_FILTERS as { value, label } (value)}
-        <button
-          type="button"
-          class="segment"
-          class:active={editor.viewFilter === value}
-          aria-pressed={editor.viewFilter === value}
-          onclick={() => applyViewFilter(value)}
-          disabled={!editor.hasAudio}
-        >
-          {label}
-        </button>
-      {/each}
-    </div>
-  </div>
+  {#each editor.tracks as lane}
+    {#if lane.detectionError}<p class="detect-error">{lane.speaker}: {lane.detectionError}</p>{/if}
+  {/each}
 
-  <button
-    type="button"
-    class="mute-toggle"
-    class:active={editor.muteMarked}
-    aria-pressed={editor.muteMarked}
-    onclick={toggleMuteMarked}
-    disabled={!editor.hasAudio}
-    title="Preview the cut: duck marked audio with a 100ms fade"
-  >
-    {editor.muteMarked ? "Marked muted" : "Mute marked"}
-  </button>
-
-  <div class="apply-actions">
-    <button
-      type="button"
-      class="apply apply-silence"
-      onclick={applySilence}
-      disabled={!editor.hasAudio || markerCount === 0}
-      title="Bake silence into marked regions — same length, can't be undone"
-    >
-      Apply silence
-    </button>
-    <button
-      type="button"
-      class="apply apply-remove"
-      onclick={applyRemove}
-      disabled={!editor.hasAudio || markerCount === 0}
-      title="Cut marked regions out — shortens the file, can't be undone"
-    >
-      Apply remove
-    </button>
-  </div>
-
-  {#if applyError}
-    <span class="detect-error">{applyError}</span>
-  {/if}
-
-  {#if editor.detectionError}
-    <span class="detect-error">{editor.detectionError}</span>
-  {/if}
-
-  {#if editor.hasSelection && editor.selectionStartSec !== null && editor.selectionEndSec !== null}
-    <div class="selection-actions">
-      <span class="selection-range">
-        {formatTime(Math.min(editor.selectionStartSec, editor.selectionEndSec))}&ndash;{formatTime(
-          Math.max(editor.selectionStartSec, editor.selectionEndSec),
-        )}
-      </span>
-      {#if editor.selectionOverlap === "unmarked" || editor.selectionOverlap === "mixed"}
-        <button class="mark" onclick={markSelection} title="Shortcut: m">Mark <kbd>m</kbd></button>
-      {/if}
-      {#if editor.selectionOverlap === "marked" || editor.selectionOverlap === "mixed"}
-        <button class="unmark" onclick={unmarkSelection} title="Shortcut: m">Unmark <kbd>m</kbd></button>
-      {/if}
-      <button class="clear" onclick={() => editor.clearSelection()} aria-label="Clear selection" title="Shortcut: Esc">✕</button>
-    </div>
-  {/if}
 </div>
 
 <style>
-  .silence-controls {
-    display: flex;
-    align-items: center;
-    gap: 1.25rem;
-    flex-wrap: wrap;
-  }
-
-  .control {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-  }
-
-  .label {
-    font-family: var(--font-label);
-    font-size: 0.7rem;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-    color: var(--cream-dim);
-    white-space: nowrap;
-  }
-
-  input[type="range"] {
-    width: 92px;
-  }
-
-  .value {
-    font-family: var(--font-mono);
-    font-size: 0.75rem;
-    color: var(--amber);
-    min-width: 4.5ch;
-  }
-
-  .detect {
-    white-space: nowrap;
-  }
-
-  .count {
-    font-family: var(--font-mono);
-    font-size: 0.75rem;
-    color: var(--cream-dim);
-    white-space: nowrap;
-  }
-
-  .marker-nav {
-    gap: 0.4rem;
-  }
-
-  .nav-step {
-    font-size: 0.72rem;
-    padding: 0.3rem 0.55rem;
-    line-height: 1;
-  }
-
-  .nav-readout {
-    font-family: var(--font-mono);
-    font-size: 0.75rem;
-    color: var(--amber);
-    white-space: nowrap;
-    min-width: 3.5ch;
-    text-align: center;
-  }
-
-  .detect-error {
-    font-family: var(--font-mono);
-    font-size: 0.75rem;
-    color: var(--in-color);
-    white-space: nowrap;
-  }
-
-  .view-filter {
-    gap: 0.6rem;
-  }
-
-  .segmented {
-    display: flex;
-    border: 1px solid var(--panel-line);
-    border-radius: 5px;
-    overflow: hidden;
-  }
-
-  .segment {
-    font-size: 0.72rem;
-    padding: 0.4rem 0.65rem;
-    border: none;
-    border-right: 1px solid var(--panel-line);
-    border-radius: 0;
-    white-space: nowrap;
-  }
-
-  .segment:last-child {
-    border-right: none;
-  }
-
-  .segment.active {
-    color: var(--chassis);
-    background: var(--amber);
-  }
-
-  .segment.active:hover:not(:disabled) {
-    background: var(--amber);
-  }
-
-  .mute-toggle {
-    font-size: 0.75rem;
-    white-space: nowrap;
-  }
-
-  .mute-toggle.active {
-    color: var(--out-color);
-    border-color: var(--out-color);
-    background: rgba(63, 167, 154, 0.16);
-  }
-
-  .apply-actions {
-    display: flex;
-    gap: 0.4rem;
-  }
-
-  .apply {
-    font-size: 0.75rem;
-    white-space: nowrap;
-    color: var(--in-color);
-    border-color: var(--in-color);
-  }
-
-  .apply:hover:not(:disabled) {
-    background: rgba(209, 73, 91, 0.16);
-  }
-
-  .selection-actions {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    padding: 0.3rem 0.6rem;
-    background: rgba(242, 230, 208, 0.08);
-    border: 1px solid var(--panel-highlight);
-    border-radius: 6px;
-  }
-
-  .selection-range {
-    font-family: var(--font-mono);
-    font-size: 0.75rem;
-    color: var(--cream-dim);
-    white-space: nowrap;
-  }
-
-  .selection-actions .mark,
-  .selection-actions .unmark {
-    font-size: 0.75rem;
-    padding: 0.25rem 0.6rem;
-    white-space: nowrap;
-  }
-
-  .selection-actions .mark {
-    color: var(--out-color);
-    border-color: var(--out-color);
-  }
-
-  .selection-actions .unmark {
-    color: var(--in-color);
-    border-color: var(--in-color);
-  }
-
-  .selection-actions .clear {
-    font-size: 0.75rem;
-    padding: 0.15rem 0.4rem;
-    opacity: 0.7;
-  }
-
-  .selection-actions kbd {
-    font-family: var(--font-mono);
-    font-size: 0.65rem;
-    opacity: 0.7;
-    margin-left: 0.1rem;
-  }
+  .silence-controls { display: flex; flex-direction: column; align-items: stretch; gap: 1.1rem; }
+  .scope { font-size: .75rem; color: var(--cream-dim); }
+  .scope strong { color: var(--amber); }
+  .control { display: flex; align-items: center; flex-wrap: wrap; gap: .5rem; }
+  .label { flex: 1 0 100%; font-size: .75rem; color: var(--cream-dim); }
+  input[type="range"] { flex: 1; min-width: 80px; width: 60%; }
+  .value, .count { font: .7rem var(--font-mono); color: var(--cream-dim); }
+  .silence-controls :global(.detect) { width: 100%; }
+  .vad-option { display: flex; align-items: flex-start; gap: .65rem; padding: .7rem; border: 1px solid var(--panel-line); border-radius: 5px; }
+  .vad-option span { display: grid; gap: .2rem; font-size: .75rem; }
+  .vad-option small { color: var(--cream-dim); line-height: 1.35; }
+  .marker-nav { justify-content: center; }
+  .detect-error { color: var(--in-color); font-size: .75rem; }
 </style>

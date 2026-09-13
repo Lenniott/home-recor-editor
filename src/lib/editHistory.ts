@@ -43,10 +43,16 @@ export class EditHistory<T> {
    * Pop the most recent checkpoint if `state` has not diverged from it —
    * e.g. a pointerdown/pointerup gesture that never actually moved
    * anything. Keeps every no-op click from consuming an undo step.
+   * Returns whether the checkpoint was discarded, so callers can tell a
+   * real edit from a no-op gesture (see `EditorState.endEdit`'s dirty tracking).
    */
-  discardIfUnchanged(state: T, equal: (a: T, b: T) => boolean): void {
+  discardIfUnchanged(state: T, equal: (a: T, b: T) => boolean): boolean {
     const last = this.undoStack[this.undoStack.length - 1];
-    if (last !== undefined && equal(last, state)) this.undoStack.pop();
+    if (last !== undefined && equal(last, state)) {
+      this.undoStack.pop();
+      return true;
+    }
+    return false;
   }
 
   /**

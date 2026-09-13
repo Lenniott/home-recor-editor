@@ -30,6 +30,11 @@ export async function detectSpeechSegments(
   const vad = await NonRealTimeVAD.new({
     positiveSpeechThreshold: options.positiveSpeechThreshold,
     negativeSpeechThreshold: options.negativeSpeechThreshold,
+    // Editor boundaries need short pauses, not the library's 1.4s conversation hangover.
+    // Speech protection and transcription context are added explicitly by their callers.
+    redemptionMs: 192,
+    preSpeechPadMs: 0,
+    minSpeechMs: 192,
     modelURL: `${VAD_ASSET_PATH}silero_vad_legacy.onnx`,
     ortConfig: (ort) => {
       ort.env.wasm.wasmPaths = VAD_ASSET_PATH;

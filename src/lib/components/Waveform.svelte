@@ -1,104 +1,52 @@
 <script lang="ts">
-  import { editor } from "../editor.svelte";
+  import { editor, type TrackState } from "../editor.svelte";
   import { player } from "../player";
   import { computePeaksRange, type PeakColumns } from "../audio/peaks";
-  import { keptToSource, sourceToKept, type TimelineSpan } from "../audio/timelineMap";
+  import { laneLayout } from "../audio/laneLayout";
+  import { keptToSource, type TimelineSpan } from "../audio/timelineMap";
   import { theme } from "../theme";
 
-  let container: HTMLDivElement | undefined;
+  /**
+   * One lane, drawn for one track. Everything about *where* things sit on
+   * screen (zoom window, cut map, playhead, selection) is shared
+   * project state, so two lanes always line up; only the samples and the
+   * silence marks are this track's own.
+   */
+  let {
+    track,
+    amplitudeZoomDb = 0,
+    tweak = false,
+  }: { track: TrackState; amplitudeZoomDb?: number; tweak?: boolean } = $props();
+
   let canvas: HTMLCanvasElement | undefined = $state();
   let width: number = $state(0);
   let height: number = $state(0);
 
   const HIT_RADIUS = 7;
-  const FLAG_SIZE = 9;
   /** Pointer moves less than this many pixels while down still counts as a click (seek), not a drag-select. */
   const CLICK_THRESHOLD_PX = 4;
-  const MIN_VIEW_DURATION_SEC = 0.2;
-  /** exp(deltaY * ZOOM_SENSITIVITY): higher = more zoom per wheel notch. */
-  const ZOOM_SENSITIVITY = 0.008;
-  /** Pixel width reserved for a collapsed (hidden) span, so its two edge ticks stay apart and independently draggable. */
-  const GUTTER_PX = 14;
-  const MIN_GUTTER_PX = 3;
-  /** However many gutters are visible at once, they never eat more than this fraction of the canvas. */
-  const MAX_GUTTER_BUDGET_FRACTION = 0.5;
   const EPS = 1e-6;
 
   type DragTarget =
-    | { type: "in" }
-    | { type: "out" }
+    | { type: "cut"; index: number; edge: "start" | "end" }
     | { type: "silence"; index: number; edge: "start" | "end" }
+    | { type: "trim"; edge: "start" | "end"; otherSec: number }
     | { type: "select"; anchorSec: number; startX: number; moved: boolean };
 
   let drag: DragTarget | null = null;
 
-  /**
-   * Pixel layout for the current view: kept seconds map to pixels at a
-   * constant rate (`pps`), except each hidden span reserves a fixed
-   * `gutterPx` slice regardless of its own (zero) kept width. That
-   * reserved slice is what keeps a collapsed region's two edge ticks
-   * apart on screen instead of stacked on the same pixel — hidden spans
-   * collapse to a single point in kept-time (see `timelineMap.ts`), so
-   * without a pixel-only reservation there'd be nothing to drag apart.
-   */
-  const layout = $derived.by(() => {
-    const viewStart = editor.viewStartSec;
-    const viewEnd = editor.viewStartSec + editor.viewDurationSec;
-    const gutters = editor.timelineSpans
-      .filter((span) => span.kind === "hidden" && span.keptStart >= viewStart - EPS && span.keptStart <= viewEnd + EPS)
-      .map((span) => span.keptStart);
+  const isActive = $derived(editor.activeTrack?.id === track.id);
 
-    const gutterPx =
-      gutters.length > 0
-        ? Math.max(MIN_GUTTER_PX, Math.min(GUTTER_PX, (width * MAX_GUTTER_BUDGET_FRACTION) / gutters.length))
-        : GUTTER_PX;
-    const reservedPx = gutters.length * gutterPx;
-    const pixelsPerKeptSecond = editor.viewDurationSec > 0 ? Math.max(0, width - reservedPx) / editor.viewDurationSec : 0;
+  /** Shared pixel layout — see `laneLayout`. */
+  const layout = $derived(laneLayout(editor.timelineSpans, editor.viewStartSec, editor.viewDurationSec, width));
 
-    return { viewStartKept: viewStart, pps: pixelsPerKeptSecond, gutterPx, gutters };
-  });
-
-  /** Kept seconds -> pixels. `side` picks which edge of a gutter to land on when `keptSec` lands exactly on a collapsed span's point. */
-  function keptToX(keptSec: number, side: "start" | "end" = "start"): number {
-    let cursorKept = layout.viewStartKept;
-    let cursorX = 0;
-    for (const g of layout.gutters) {
-      if (keptSec < g - EPS) break;
-      const gutterStartX = cursorX + (g - cursorKept) * layout.pps;
-      if (Math.abs(keptSec - g) <= EPS) return side === "end" ? gutterStartX + layout.gutterPx : gutterStartX;
-      cursorKept = g;
-      cursorX = gutterStartX + layout.gutterPx;
-    }
-    return cursorX + (keptSec - cursorKept) * layout.pps;
-  }
-
-  /** Pixels -> kept seconds. A pixel inside a gutter's reserved slice snaps to that gutter's single collapsed point. */
-  function xToKept(x: number): number {
-    let cursorKept = layout.viewStartKept;
-    let cursorX = 0;
-    for (const g of layout.gutters) {
-      const gutterStartX = cursorX + (g - cursorKept) * layout.pps;
-      const gutterEndX = gutterStartX + layout.gutterPx;
-      if (x < gutterStartX) return cursorKept + (x - cursorX) / (layout.pps || 1);
-      if (x <= gutterEndX) return g;
-      cursorKept = g;
-      cursorX = gutterEndX;
-    }
-    return cursorKept + (x - cursorX) / (layout.pps || 1);
-  }
-
-  /** Source (file) seconds -> pixels, through the kept-time layout above. */
+  /** Source (file) seconds -> pixels, through the shared kept-time layout. */
   function sourceTimeToX(t: number, side: "start" | "end" = "start"): number {
-    return keptToX(sourceToKept(editor.timelineSpans, t), side);
+    return layout.sourceToX(t, side);
   }
 
   function xToSourceTime(x: number): number {
-    return keptToSource(editor.timelineSpans, xToKept(x));
-  }
-
-  /** Pixel bounds of a specific hidden span's own gutter (its keptStart === keptEnd, so "start"/"end" land on that gutter's own left/right edge). */
-  function gutterPixelBounds(span: TimelineSpan): { startX: number; endX: number } {
-    return { startX: keptToX(span.keptStart, "start"), endX: keptToX(span.keptStart, "end") };
+    return keptToSource(editor.timelineSpans, layout.xToKept(x));
   }
 
   /** Clicking inside a gutter feels like clicking the audio right after it, not into the hidden stretch that's the whole point of hiding. */
@@ -106,7 +54,7 @@
     for (let i = 0; i < editor.timelineSpans.length; i++) {
       const span = editor.timelineSpans[i];
       if (span.kind !== "hidden") continue;
-      const { startX, endX } = gutterPixelBounds(span);
+      const { startX, endX } = layout.gutterBounds(span);
       if (x >= startX && x <= endX) {
         const next = editor.timelineSpans[i + 1];
         return next ? next.sourceStart : span.sourceEnd;
@@ -116,7 +64,7 @@
   }
 
   function findHiddenSpanForRegion(index: number): TimelineSpan | undefined {
-    const displayed = editor.markers[index]?.displayed;
+    const displayed = track.markers[index]?.displayed;
     if (!displayed) return undefined;
     return editor.timelineSpans.find(
       (span) =>
@@ -136,7 +84,7 @@
   function resolveSilenceDragSourceSec(index: number, x: number): number {
     const hidden = findHiddenSpanForRegion(index);
     if (hidden) {
-      const { startX, endX } = gutterPixelBounds(hidden);
+      const { startX, endX } = layout.gutterBounds(hidden);
       if (x >= startX && x <= endX) {
         const ratio = endX > startX ? (x - startX) / (endX - startX) : 0;
         return hidden.sourceStart + ratio * (hidden.sourceEnd - hidden.sourceStart);
@@ -149,22 +97,31 @@
     return Math.min(Math.max(value, min), max);
   }
 
-  /**
-   * IN's flag snaps to the far edge of a gutter it falls inside (where
-   * playback would actually resume) and OUT's flag snaps to the near
-   * edge (where the last audible content ends) — that way the flags
-   * always sit where playback truly starts/stops instead of hovering
-   * over hidden audio that's never heard.
-   */
   function hitTest(x: number): DragTarget | null {
-    if (Math.abs(x - sourceTimeToX(editor.inSec, "end")) <= HIT_RADIUS) return { type: "in" };
-    if (Math.abs(x - sourceTimeToX(editor.outSec, "start")) <= HIT_RADIUS) return { type: "out" };
-    for (let i = 0; i < editor.markers.length; i++) {
-      const displayed = editor.markers[i].displayed;
+    if (editor.preview === "original") for (let i = 0; i < editor.cuts.length; i++) {
+      for (const edge of ["start", "end"] as const)
+        if (Math.abs(x - sourceTimeToX(editor.cuts[i][edge], edge)) <= HIT_RADIUS) return {type:"cut",index:i,edge};
+    }
+    for (let i = 0; i < track.markers.length; i++) {
+      const displayed = track.markers[i].displayed;
       if (!displayed) continue;
       if (Math.abs(x - sourceTimeToX(displayed.start, "start")) <= HIT_RADIUS) return { type: "silence", index: i, edge: "start" };
       if (Math.abs(x - sourceTimeToX(displayed.end, "end")) <= HIT_RADIUS) return { type: "silence", index: i, edge: "end" };
     }
+    return null;
+  }
+
+  function pendingRange(): { start: number; end: number } | null {
+    return editor.cutScopePreview ? editor.selectionRange : editor.selectionFor(track);
+  }
+
+  function selectionEdgeHit(x: number): DragTarget | null {
+    const range = pendingRange();
+    if (!range) return null;
+    if (Math.abs(x - sourceTimeToX(range.start, "start")) <= HIT_RADIUS)
+      return { type: "trim", edge: "start", otherSec: range.end };
+    if (Math.abs(x - sourceTimeToX(range.end, "end")) <= HIT_RADIUS)
+      return { type: "trim", edge: "end", otherSec: range.start };
     return null;
   }
 
@@ -179,13 +136,13 @@
     const key = `${startSample}:${endSample}:${columns}`;
     const cached = peaksCache.get(key);
     if (cached) return cached;
-    const peaks = computePeaksRange(editor.monoSamples, startSample, endSample, columns);
+    const peaks = computePeaksRange(track.monoSamples, startSample, endSample, columns);
     peaksCache.set(key, peaks);
     return peaks;
   }
 
   function refreshPeaksCache(): void {
-    let signature = `${editor.viewStartSec.toFixed(4)}:${editor.viewDurationSec.toFixed(4)}:${width}:${editor.monoSamples.length}`;
+    let signature = `${editor.viewStartSec.toFixed(4)}:${editor.viewDurationSec.toFixed(4)}:${width}:${track.monoSamples.length}`;
     for (const span of editor.timelineSpans) {
       signature += `|${span.kind === "keep" ? "k" : "h"}${span.sourceStart.toFixed(4)}-${span.sourceEnd.toFixed(4)}`;
     }
@@ -203,6 +160,15 @@
     ctx.stroke();
   }
 
+  function amplitudeToHeight(value: number, halfHeight: number): number {
+    const gain = 10 ** (amplitudeZoomDb / 20);
+    return clamp(Math.abs(value) * gain, 0, 1) * halfHeight;
+  }
+
+  function sampleToY(value: number, centerY: number, halfHeight: number): number {
+    return centerY - Math.sign(value) * amplitudeToHeight(value, halfHeight);
+  }
+
   /** Draws each visible `keep` span's peaks in its own pixel slice; `hidden` spans are left blank here for `drawGutters` to fill in. */
   function drawWaveform(ctx: CanvasRenderingContext2D): void {
     refreshPeaksCache();
@@ -212,48 +178,75 @@
     const viewStart = editor.viewStartSec;
     const viewEnd = editor.viewStartSec + editor.viewDurationSec;
 
-    ctx.fillStyle = theme.amber;
+    ctx.fillStyle = editor.tracks[0]?.id === track.id ? theme.amber : "#75cbbb";
     for (const span of editor.timelineSpans) {
       if (span.kind !== "keep") continue;
       const clippedKeptStart = Math.max(span.keptStart, viewStart);
       const clippedKeptEnd = Math.min(span.keptEnd, viewEnd);
       if (clippedKeptEnd <= clippedKeptStart) continue;
 
-      const startX = Math.max(0, Math.round(keptToX(clippedKeptStart)));
-      const endX = Math.min(width, Math.round(keptToX(clippedKeptEnd)));
+      const startX = Math.max(0, Math.round(layout.keptToX(clippedKeptStart)));
+      const endX = Math.min(width, Math.round(layout.keptToX(clippedKeptEnd)));
       const columns = endX - startX;
       if (columns <= 0) continue;
 
       // A keep span maps kept time to source time 1:1 with a fixed offset.
       const offset = span.sourceStart - span.keptStart;
-      const startSample = Math.max(0, Math.floor((clippedKeptStart + offset) * editor.sampleRate));
-      const endSample = Math.min(editor.monoSamples.length, Math.ceil((clippedKeptEnd + offset) * editor.sampleRate));
+      const startSample = Math.max(0, Math.floor((clippedKeptStart + offset) * track.sampleRate));
+      const endSample = Math.min(track.monoSamples.length, Math.ceil((clippedKeptEnd + offset) * track.sampleRate));
       const { min, max } = getPeaks(startSample, endSample, columns);
 
       for (let col = 0; col < columns; col++) {
-        const yTop = centerY - max[col] * halfHeight;
-        const yBottom = centerY - min[col] * halfHeight;
+        const yTop = sampleToY(max[col], centerY, halfHeight);
+        const yBottom = sampleToY(min[col], centerY, halfHeight);
         ctx.fillRect(startX + col, Math.min(yTop, yBottom), 1, Math.max(1, Math.abs(yBottom - yTop)));
       }
     }
   }
 
-  /** Collapsed spans render as a narrow band — teal when it's marked audio being hidden, neutral when it's unmarked audio being hidden. */
+  function drawQuietFloor(ctx: CanvasRenderingContext2D): void {
+    const centerY = height / 2;
+    const offset = amplitudeToHeight(10 ** (track.settings.quietThresholdDb / 20), height / 2 - 6);
+    ctx.save();
+    ctx.strokeStyle = theme.amber;
+    ctx.globalAlpha = .6;
+    ctx.setLineDash([4, 4]);
+    ctx.beginPath();
+    ctx.moveTo(0, centerY - offset + .5);
+    ctx.lineTo(width, centerY - offset + .5);
+    ctx.moveTo(0, centerY + offset + .5);
+    ctx.lineTo(width, centerY + offset + .5);
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  /**
+   * True when a hidden span overlaps one of the project's shared cuts —
+   * not necessarily fully: `editor.hiddenIntervals` merges a cut with any
+   * touching/overlapping view-filter-hidden region into one wider span, so
+   * requiring full containment would miss a cut that's only part of a
+   * merged gutter and paint it as ordinary filtered-out audio instead.
+   */
+  function isCutSpan(span: TimelineSpan): boolean {
+    return editor.cuts.some((cut) => span.sourceStart < cut.end - EPS && span.sourceEnd > cut.start + EPS);
+  }
+
+  /** Collapsed spans render as a narrow band — red for a shared cut, teal for marked audio being hidden, neutral otherwise. */
   function drawGutters(ctx: CanvasRenderingContext2D): void {
-    const isMarkedHidden = editor.viewFilter === "hideMarked";
     for (const span of editor.timelineSpans) {
       if (span.kind !== "hidden") continue;
-      const { startX, endX } = gutterPixelBounds(span);
+      const { startX, endX } = layout.gutterBounds(span);
       const clampedStart = Math.max(0, startX);
       const clampedEnd = Math.min(width, endX);
       const gutterWidth = clampedEnd - clampedStart;
       if (gutterWidth <= 0) continue;
 
-      ctx.fillStyle = isMarkedHidden ? theme.markedFill : theme.gutterFill;
+      const cut = isCutSpan(span);
+      ctx.fillStyle = cut ? theme.cutFill : editor.viewFilter === "hideMarked" ? theme.markedFill : theme.gutterFill;
       ctx.fillRect(clampedStart, 0, gutterWidth, height);
 
       ctx.save();
-      ctx.strokeStyle = isMarkedHidden ? theme.markedBorder : theme.gutterBorder;
+      ctx.strokeStyle = cut ? theme.cutBorder : editor.viewFilter === "hideMarked" ? theme.markedBorder : theme.gutterBorder;
       ctx.lineWidth = 1;
       ctx.setLineDash([2, 3]);
       ctx.beginPath();
@@ -263,6 +256,27 @@
       ctx.lineTo(clampedEnd - 0.5, height);
       ctx.stroke();
       ctx.restore();
+    }
+  }
+
+  /**
+   * Accepted cuts, while the original preview is showing them in place —
+   * in the edited preview they're collapsed into gutters instead (see
+   * `drawGutters`), which is the whole point of a cut.
+   */
+  function drawCuts(ctx: CanvasRenderingContext2D): void {
+    if (editor.preview !== "original") return;
+    for (const cut of editor.cuts) {
+      const startX = sourceTimeToX(cut.start, "start");
+      const endX = sourceTimeToX(cut.end, "end");
+      if (endX <= startX) continue;
+      ctx.fillStyle = theme.cutFill;
+      ctx.fillRect(startX, 0, endX - startX, height);
+      ctx.strokeStyle = theme.cutBorder;
+      ctx.lineWidth = 1.5;
+      ctx.strokeRect(startX + 0.75, 0.75, Math.max(0, endX - startX - 1.5), height - 1.5);
+      drawTick(ctx, startX);
+      drawTick(ctx, endX);
     }
   }
 
@@ -301,9 +315,9 @@
    * instead of stacked on the same pixel.
    */
   function drawMarkers(ctx: CanvasRenderingContext2D): void {
-    const collapsed = editor.viewFilter === "hideMarked";
+    const collapsed = editor.viewFilter === "hideMarked" && editor.preview === "edited";
 
-    for (const region of editor.markers) {
+    for (const region of track.markers) {
       if (!region.displayed) continue;
 
       if (!collapsed) {
@@ -361,19 +375,12 @@
     }
   }
 
-  function drawOutsideShade(ctx: CanvasRenderingContext2D): void {
-    const inX = sourceTimeToX(editor.inSec, "end");
-    const outX = sourceTimeToX(editor.outSec, "start");
-    ctx.fillStyle = theme.outsideShade;
-    if (inX > 0) ctx.fillRect(0, 0, Math.min(inX, width), height);
-    if (outX < width) ctx.fillRect(Math.max(outX, 0), 0, width - Math.max(outX, 0), height);
-  }
-
-  /** The pending drag-to-select range, before Mark/Unmark is chosen. */
+  /** The pending drag-to-select range, before Mark/Unmark/Cut is chosen. */
   function drawPendingSelection(ctx: CanvasRenderingContext2D): void {
-    if (editor.selectionStartSec === null || editor.selectionEndSec === null) return;
-    const startX = sourceTimeToX(Math.min(editor.selectionStartSec, editor.selectionEndSec), "start");
-    const endX = sourceTimeToX(Math.max(editor.selectionStartSec, editor.selectionEndSec), "end");
+    const range = editor.cutScopePreview ? editor.selectionRange : editor.selectionFor(track);
+    if (!range) return;
+    const startX = sourceTimeToX(range.start, "start");
+    const endX = sourceTimeToX(range.end, "end");
     if (endX <= startX) return;
 
     ctx.fillStyle = theme.selectionFill;
@@ -381,29 +388,6 @@
     ctx.strokeStyle = theme.selectionBorder;
     ctx.lineWidth = 1.5;
     ctx.strokeRect(startX + 0.75, 0.75, Math.max(0, endX - startX - 1.5), height - 1.5);
-  }
-
-  function drawFlag(ctx: CanvasRenderingContext2D, x: number, color: string, direction: "left" | "right"): void {
-    ctx.strokeStyle = color;
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.moveTo(x, 0);
-    ctx.lineTo(x, height);
-    ctx.stroke();
-
-    ctx.fillStyle = color;
-    ctx.beginPath();
-    if (direction === "right") {
-      ctx.moveTo(x, 0);
-      ctx.lineTo(x + FLAG_SIZE, FLAG_SIZE * 0.6);
-      ctx.lineTo(x, FLAG_SIZE * 1.2);
-    } else {
-      ctx.moveTo(x, 0);
-      ctx.lineTo(x - FLAG_SIZE, FLAG_SIZE * 0.6);
-      ctx.lineTo(x, FLAG_SIZE * 1.2);
-    }
-    ctx.closePath();
-    ctx.fill();
   }
 
   function drawPlayhead(ctx: CanvasRenderingContext2D): void {
@@ -429,16 +413,15 @@
     ctx.fillStyle = theme.panel;
     ctx.fillRect(0, 0, width, height);
 
-    if (!editor.hasAudio || width <= 0 || height <= 0) return;
+    if (!track.hasAudio || width <= 0 || height <= 0) return;
 
     drawGrid(ctx);
     drawWaveform(ctx);
+    drawQuietFloor(ctx);
     drawGutters(ctx);
+    drawCuts(ctx);
     drawMarkers(ctx);
-    drawOutsideShade(ctx);
     drawPendingSelection(ctx);
-    drawFlag(ctx, sourceTimeToX(editor.inSec, "end"), theme.in, "right");
-    drawFlag(ctx, sourceTimeToX(editor.outSec, "start"), theme.out, "left");
     drawPlayhead(ctx);
   }
 
@@ -459,15 +442,21 @@
   $effect(() => {
     // Reads below make this effect re-run whenever any of them change,
     // without touching the canvas bitmap itself.
-    editor.monoSamples;
+    track.monoSamples;
+    track.markers;
+    track.settings.quietThresholdDb;
+    amplitudeZoomDb;
     editor.viewStartSec;
     editor.viewDurationSec;
     editor.viewFilter;
+    editor.preview;
     editor.timelineSpans;
+    editor.cuts;
     editor.playheadSec;
-    editor.inSec;
-    editor.outSec;
-    editor.markers;
+    editor.cuts;
+    editor.selectionRanges;
+    editor.cutScopePreview;
+    editor.selectionTrackIds;
     editor.selectionStartSec;
     editor.selectionEndSec;
 
@@ -475,25 +464,60 @@
   });
 
   function onPointerDown(e: PointerEvent): void {
-    if (!editor.hasAudio) return;
+    if (!track.hasAudio) return;
     // Opens the undo transaction for this whole gesture — matched by
     // `editor.endEdit()` in `onPointerUp`, which fires whether it turns
     // into a marker/IN/OUT drag, a drag-select, or just a click-seek.
     editor.beginEdit();
-    drag = hitTest(e.offsetX) ?? { type: "select", anchorSec: resolveClickSourceSec(e.offsetX), startX: e.offsetX, moved: false };
+    // Touching a lane is what makes it the one the mark/detect controls apply to.
+    editor.setActiveTrack(track.id);
+    if (tweak) {
+      drag =
+        selectionEdgeHit(e.offsetX) ??
+        {
+          type: "select",
+          anchorSec: resolveClickSourceSec(e.offsetX),
+          startX: e.offsetX,
+          moved: false,
+        };
+    } else {
+      drag =
+        hitTest(e.offsetX) ??
+        {
+          type: "select",
+          anchorSec: resolveClickSourceSec(e.offsetX),
+          startX: e.offsetX,
+          moved: false,
+        };
+    }
     canvas?.setPointerCapture(e.pointerId);
   }
 
   function onPointerMove(e: PointerEvent): void {
-    if (!drag || !editor.hasAudio) return;
-    if (drag.type === "in") editor.setIn(xToSourceTime(e.offsetX));
-    else if (drag.type === "out") editor.setOut(xToSourceTime(e.offsetX));
-    else if (drag.type === "silence") {
-      editor.moveMarker(drag.index, drag.edge, resolveSilenceDragSourceSec(drag.index, e.offsetX));
+    if (!drag || !track.hasAudio) return;
+    if (drag.type === "cut") {
+      editor.moveCut(drag.index, drag.edge, xToSourceTime(e.offsetX));
+    } else if (drag.type === "silence") {
+      editor.moveMarker(track, drag.index, drag.edge, resolveSilenceDragSourceSec(drag.index, e.offsetX));
+    } else if (drag.type === "trim") {
+      const t = xToSourceTime(e.offsetX);
+      editor.setSelection(
+        drag.edge === "start" ? t : drag.otherSec,
+        drag.edge === "end" ? t : drag.otherSec,
+        [...editor.selectionTrackIds],
+      );
+    } else if (tweak) {
+      // Compact audio only trims an existing range; a drag on empty space is not a new select.
     } else {
       const t = xToSourceTime(e.offsetX);
       if (!drag.moved && Math.abs(e.offsetX - drag.startX) > CLICK_THRESHOLD_PX) drag.moved = true;
-      if (drag.moved) editor.setSelection(drag.anchorSec, t);
+      if (drag.moved) {
+        const lanes = Array.from(document.querySelectorAll<HTMLElement>("[data-track-lane]"));
+        const origin = lanes.findIndex(lane => lane.dataset.trackLane === track.id);
+        const target = lanes.findIndex(lane => { const box = lane.getBoundingClientRect(); return e.clientY >= box.top && e.clientY <= box.bottom; });
+        const ids = target < 0 ? [track.id] : lanes.slice(Math.min(origin, target), Math.max(origin, target) + 1).map(lane => lane.dataset.trackLane!);
+        editor.setSelection(drag.anchorSec, t, ids);
+      }
     }
   }
 
@@ -505,17 +529,31 @@
         // there and drop any previously pending selection instead of
         // leaving a zero-width one behind.
         player.seek(drag.anchorSec);
-        editor.clearSelection();
+        const at = drag.anchorSec;
+        const cut = editor.cuts.find(r => r.start <= at && r.end > at);
+        const silence = track.rawMarkers.find(r => r.start <= at && r.end > at);
+        if (cut) {
+          editor.markerAction = "cut";
+          editor.setSelection(cut.start,cut.end,editor.tracks.map(t => t.id));
+        } else if (silence) {
+          editor.markerAction = "silence";
+          editor.setSelection(silence.start,silence.end,[track.id]);
+        } else if (!tweak) editor.clearSelection();
       } else {
         // A real drag: auto-merge into an existing marked region if the
-        // overlap is substantial, otherwise leave it pending for Mark/Unmark.
-        editor.finishSelectionDrag();
+        // overlap is substantial, otherwise leave it pending for Mark/Unmark/Cut.
+        editor.finishSelectionDrag(track);
         player.refreshIfPlaying();
       }
+    } else if (drag.type === "trim") {
+      player.refreshIfPlaying();
+    } else if (drag.type === "cut") {
+      editor.finishCutDrag();
+      player.refreshIfPlaying();
     } else if (drag.type === "silence") {
       // Merge check happens only here, once, rather than on every
       // pointermove — see finishMarkerDrag for why.
-      editor.finishMarkerDrag(drag.index);
+      editor.finishMarkerDrag(track, drag.index);
       player.refreshIfPlaying();
     }
     drag = null;
@@ -524,85 +562,18 @@
     // playhead position) is dropped as a no-op inside `endEdit`.
     editor.endEdit();
   }
-
-  // Wheel events can fire faster than the display refreshes; batching them
-  // into one setView per animation frame keeps a fast zoom/pan flick from
-  // queuing up redundant state writes (and redraws) behind each other.
-  let rafId: number | null = null;
-  let wheelIsZoom = false;
-  let wheelZoomFactor = 1;
-  let wheelAnchorX = 0;
-  let wheelPanDeltaSec = 0;
-
-  /** A zoom/pan flick is a burst of many wheel events, not one — the undo transaction stays open until the burst goes quiet for this long. */
-  const WHEEL_IDLE_MS = 300;
-  let wheelIdleTimeout: ReturnType<typeof setTimeout> | null = null;
-
-  function flushWheel(): void {
-    if (wheelIsZoom) {
-      const anchorKept = xToKept(wheelAnchorX);
-      const newDuration = clamp(editor.viewDurationSec * wheelZoomFactor, MIN_VIEW_DURATION_SEC, editor.displayKeptDuration || 1);
-      const ratio = width > 0 ? wheelAnchorX / width : 0.5;
-      editor.setView(anchorKept - ratio * newDuration, newDuration);
-      wheelZoomFactor = 1;
-    } else {
-      editor.setView(editor.viewStartSec + wheelPanDeltaSec, editor.viewDurationSec);
-      wheelPanDeltaSec = 0;
-    }
-  }
-
-  function scheduleWheelFlush(): void {
-    if (rafId !== null) return;
-    rafId = requestAnimationFrame(() => {
-      rafId = null;
-      flushWheel();
-    });
-  }
-
-  function onWheel(e: WheelEvent): void {
-    if (!editor.hasAudio) return;
-    e.preventDefault();
-
-    // First event of a burst opens the transaction; every later event in
-    // the same burst just pushes the idle deadline back, so a long flick
-    // still becomes one undo step instead of one per animation frame.
-    if (wheelIdleTimeout === null) editor.beginEdit();
-    else clearTimeout(wheelIdleTimeout);
-    wheelIdleTimeout = setTimeout(() => {
-      wheelIdleTimeout = null;
-      editor.endEdit();
-    }, WHEEL_IDLE_MS);
-
-    const isZoom = e.ctrlKey || e.metaKey;
-    if (isZoom !== wheelIsZoom && rafId !== null) {
-      // Mode changed mid-batch (e.g. user let go of Ctrl): flush the
-      // pending zoom/pan before starting to accumulate the other kind.
-      cancelAnimationFrame(rafId);
-      rafId = null;
-      flushWheel();
-    }
-    wheelIsZoom = isZoom;
-
-    if (isZoom) {
-      wheelAnchorX = e.offsetX;
-      wheelZoomFactor *= Math.exp(e.deltaY * ZOOM_SENSITIVITY);
-    } else {
-      wheelPanDeltaSec += (e.deltaX || e.deltaY) * (editor.viewDurationSec / Math.max(1, width));
-    }
-    scheduleWheelFlush();
-  }
 </script>
 
-<div class="waveform" bind:this={container} bind:clientWidth={width} bind:clientHeight={height}>
-  {#if editor.hasAudio}
+<div class="waveform" class:active={isActive} bind:clientWidth={width} bind:clientHeight={height}>
+  {#if track.hasAudio}
     <canvas
+      class:tweak
       bind:this={canvas}
       style="width:{width}px;height:{height}px"
       onpointerdown={onPointerDown}
       onpointermove={onPointerMove}
       onpointerup={onPointerUp}
       onpointercancel={onPointerUp}
-      onwheel={onWheel}
     ></canvas>
   {:else}
     <div class="empty">
@@ -624,10 +595,18 @@
     overflow: hidden;
   }
 
+  .waveform.active {
+    border-color: var(--amber);
+  }
+
   canvas {
     display: block;
     cursor: crosshair;
     touch-action: none;
+  }
+
+  canvas.tweak {
+    cursor: default;
   }
 
   .empty {

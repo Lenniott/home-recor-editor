@@ -30,13 +30,23 @@ export async function decodeAudioFile(
  */
 export function mixToMono(buffer: AudioBuffer): Float32Array {
   if (buffer.numberOfChannels === 1) return buffer.getChannelData(0).slice();
+  const channels = Array.from({ length: buffer.numberOfChannels }, (_, ch) => buffer.getChannelData(ch));
+  return averageChannels(channels);
+}
 
-  const mono = new Float32Array(buffer.length);
-  for (let ch = 0; ch < buffer.numberOfChannels; ch++) {
-    const data = buffer.getChannelData(ch);
-    for (let i = 0; i < data.length; i++) {
-      mono[i] += data[i] / buffer.numberOfChannels;
-    }
+/**
+ * Average two or more equal-length channels down to one — the shared core
+ * behind `mixToMono` above (an `AudioBuffer`'s channels) and
+ * `downmixToMono` in `exportMix.ts` (raw arrays from a rendered export, no
+ * `AudioBuffer` involved). Always a fresh array. Callers with exactly one
+ * channel should skip this and copy it directly instead — averaging a
+ * single channel with itself is just a slower way to do the same thing.
+ */
+export function averageChannels(channels: Float32Array[]): Float32Array {
+  const length = channels.reduce((longest, data) => Math.max(longest, data.length), 0);
+  const mono = new Float32Array(length);
+  for (const data of channels) {
+    for (let i = 0; i < data.length; i++) mono[i] += data[i] / channels.length;
   }
   return mono;
 }

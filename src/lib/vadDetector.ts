@@ -9,13 +9,22 @@ import type { SpeechSegment } from "./audio/silence";
  */
 export class VadDetector {
   private worker: Worker | null = null;
+  private pending: Promise<unknown> = Promise.resolve();
 
   detect(
     samples: Float32Array,
     sampleRate: number,
     options: VadOptions,
     onProgress?: (fraction: number) => void,
+    signal?: AbortSignal,
   ): Promise<SpeechSegment[]> {
+    const task = this.pending.then(() => this.run(samples, sampleRate, options, onProgress, signal));
+    this.pending = task.catch(() => {});
+    return task;
+  }
+
+  private run(samples: Float32Array, sampleRate: number, options: VadOptions, onProgress?: (fraction: number) => void, signal?: AbortSignal): Promise<SpeechSegment[]> {
+    if (signal?.aborted) return Promise.reject(new Error("Cancelled"));
     const worker = this.getWorker();
     return new Promise((resolve, reject) => {
       const handleMessage = (event: MessageEvent<VadWorkerResponse>) => {
@@ -34,11 +43,19 @@ export class VadDetector {
         cleanup();
         reject(event.error ?? new Error(event.message));
       };
+      const abort = (): void => {
+        cleanup();
+        worker.terminate();
+        if (this.worker === worker) this.worker = null;
+        reject(new Error("Cancelled"));
+      };
       const cleanup = (): void => {
+        signal?.removeEventListener("abort", abort);
         worker.removeEventListener("message", handleMessage);
         worker.removeEventListener("error", handleError);
       };
 
+      signal?.addEventListener("abort", abort, {once:true});
       worker.addEventListener("message", handleMessage);
       worker.addEventListener("error", handleError);
       // Not transferred: the caller (editor state) still needs `samples`

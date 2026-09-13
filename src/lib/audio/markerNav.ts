@@ -3,9 +3,9 @@ import type { DisplayedInterval } from "./timelineMap";
 export type NavDirection = "next" | "prev";
 
 /** Padding around a fitted region, as a fraction of its own width, added to each side. */
-const FIT_PADDING_FRACTION = 0.1;
+const FIT_PADDING_FRACTION = 1;
 /** Same floor as wheel-zoom in Waveform.svelte — fitting a very short region shouldn't zoom past what the waveform can usefully render. */
-const MIN_VIEW_SECONDS = 0.2;
+const MIN_VIEW_SECONDS = 4;
 
 export interface ViewWindow {
   startSec: number;
@@ -70,7 +70,7 @@ export function currentRegionNumber(regions: DisplayedInterval[], playheadSec: n
 
 /**
  * Zoom window (source seconds — caller must be in the "all" view filter,
- * where kept time equals source time) that fits `region` with ~10%
+ * where kept time equals source time) that fits `region` with one region of
  * padding on each side, floored at `MIN_VIEW_SECONDS` and clamped to
  * `[0, totalDurationSec]`.
  */
