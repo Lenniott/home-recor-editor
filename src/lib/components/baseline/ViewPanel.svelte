@@ -42,7 +42,8 @@
         {@render tools?.()}
         {#if showToggle}
           <Button
-            variant="secondary"
+            size="tool"
+            variant="tertiary"
             icon="left"
             label={false}
             tooltip
@@ -64,6 +65,7 @@
 
 <style>
   .view-panel {
+    position: relative;
     display: flex;
     flex-direction: column;
     min-height: 0;
@@ -88,7 +90,7 @@
     justify-content: space-between;
     gap: 0.5rem;
     flex-shrink: 0;
-    min-height: 1rem;
+    min-height: 32px;
   }
 
   h2,

@@ -3,6 +3,9 @@
 </script>
 
 <script lang="ts">
+  import Button from "./baseline/Button.svelte";
+  import Model from "./baseline/Model.svelte";
+
   let {
     isLoading = false,
     isSaving = false,
@@ -40,7 +43,7 @@
     open?: boolean;
     showTrigger?: boolean;
   } = $props();
-  let exportDialog: HTMLDialogElement | undefined = $state();
+  let exportOpen = $state(false);
   let root: HTMLElement | undefined = $state();
   let awaitingDestination = $state(false);
 
@@ -60,7 +63,7 @@
     if (!canExport || isExporting) return;
     onExportReset();
     awaitingDestination = false;
-    exportDialog?.showModal();
+    exportOpen = true;
   }
 
   async function chooseExport(choice: ExportChoice): Promise<void> {
@@ -74,14 +77,13 @@
 
   function closeExport(): void {
     if (isExporting) return;
-    exportDialog?.close();
-    onExportReset();
+    exportOpen = false;
     awaitingDestination = false;
   }
 
-  function onExportCancel(event: Event): void {
-    if (isExporting) event.preventDefault();
-    else onExportReset();
+  function onExportClose(): void {
+    onExportReset();
+    awaitingDestination = false;
   }
 
   function onWindowPointerDown(event: PointerEvent): void {
@@ -96,7 +98,7 @@
   }
 
   $effect(() => {
-    if (isExporting && exportDialog && !exportDialog.open) exportDialog.showModal();
+    if (isExporting && !exportOpen) exportOpen = true;
   });
 </script>
 
@@ -104,15 +106,15 @@
 
 <div class="file-menu" class:anchored={!showTrigger} bind:this={root}>
   {#if showTrigger}
-    <button
-      type="button"
-      class="file-toggle"
+    <Button
+      variant="secondary"
+      toggle
+      bind:pressed={open}
       aria-haspopup="menu"
       aria-expanded={open}
-      onclick={() => (open = !open)}
     >
       File
-    </button>
+    </Button>
   {/if}
   {#if open}
     <div class="menu" role="menu">
@@ -129,39 +131,47 @@
   {/if}
 </div>
 
-<dialog class="modal" bind:this={exportDialog} aria-labelledby="export-title" oncancel={onExportCancel}>
-  <h2 id="export-title">Export</h2>
-  <p>Apply all silence and cut markers to new WAV files. The project stays editable.</p>
-  {#if showExportProgress}
-    <div
-      class="export-progress"
-      role="progressbar"
-      aria-label={exportStage}
-      aria-valuemin="0"
-      aria-valuemax="100"
-      aria-valuenow={Math.round(exportProgress * 100)}
-    >
-      <div class="export-progress-track"><span style="width:{exportProgress * 100}%"></span></div>
-      <span>{exportStage} · {Math.round(exportProgress * 100)}%</span>
-    </div>
-  {:else if awaitingDestination}
-    <p class="wait">Choose a save location…</p>
-  {:else if twoTrack}
-    <button type="button" onclick={() => chooseExport("separate")}>Separate tracks</button>
-    <button type="button" onclick={() => chooseExport("mix")}>Combined mix</button>
-    <button type="button" onclick={() => chooseExport("both")}>Both</button>
-  {:else}
-    <button type="button" onclick={() => chooseExport("recording")}>Export edited recording</button>
-  {/if}
-  {#if exportError && !isExporting}
-    <p class="fail">Export failed: {exportError}</p>
-  {/if}
-  {#if !isExporting}
-    <button type="button" class="cancel" onclick={closeExport} disabled={awaitingDestination}>
-      {showExportProgress ? (exportError ? "Close" : "Done") : "Cancel"}
-    </button>
-  {/if}
-</dialog>
+<Model
+  placement="center"
+  bind:open={exportOpen}
+  labelledby="export-title"
+  closable={!isExporting}
+  onclose={onExportClose}
+>
+  <div class="export-sheet">
+    <h2 id="export-title">Export</h2>
+    <p>Apply all silence and cut markers to new WAV files. The project stays editable.</p>
+    {#if showExportProgress}
+      <div
+        class="export-progress"
+        role="progressbar"
+        aria-label={exportStage}
+        aria-valuemin="0"
+        aria-valuemax="100"
+        aria-valuenow={Math.round(exportProgress * 100)}
+      >
+        <div class="export-progress-track"><span style="width:{exportProgress * 100}%"></span></div>
+        <span>{exportStage} · {Math.round(exportProgress * 100)}%</span>
+      </div>
+    {:else if awaitingDestination}
+      <p class="wait">Choose a save location…</p>
+    {:else if twoTrack}
+      <Button variant="primary" onclick={() => chooseExport("separate")}>Separate tracks</Button>
+      <Button variant="primary" onclick={() => chooseExport("mix")}>Combined mix</Button>
+      <Button variant="primary" onclick={() => chooseExport("both")}>Both</Button>
+    {:else}
+      <Button variant="primary" onclick={() => chooseExport("recording")}>Export edited recording</Button>
+    {/if}
+    {#if exportError && !isExporting}
+      <p class="fail">Export failed: {exportError}</p>
+    {/if}
+    {#if !isExporting}
+      <Button variant="secondary" class="cancel" onclick={closeExport} disabled={awaitingDestination}>
+        {showExportProgress ? (exportError ? "Close" : "Done") : "Cancel"}
+      </Button>
+    {/if}
+  </div>
+</Model>
 
 <style>
   .file-menu {
@@ -194,25 +204,15 @@
     text-align: left;
     padding: 0.4rem 0.65rem;
   }
-  .modal[open] {
-    width: min(22rem, calc(100vw - 2rem));
+  .export-sheet {
     display: grid;
     gap: 0.5rem;
-    padding: 1.1rem;
-    background: var(--panel);
-    color: var(--cream);
-    border: 1px solid var(--panel-line);
-    border-radius: 8px;
-    box-shadow: 0 12px 40px #000a;
   }
-  .modal::backdrop {
-    background: #0008;
-  }
-  .modal h2 {
+  .export-sheet h2 {
     margin: 0;
     font-size: 0.95rem;
   }
-  .modal p {
+  .export-sheet p {
     margin: 0 0 0.35rem;
     font-size: 0.75rem;
     line-height: 1.5;
@@ -243,7 +243,7 @@
     background: var(--amber);
     transition: width 0.16s ease-out;
   }
-  .cancel {
+  .export-sheet :global(.cancel) {
     margin-top: 0.25rem;
   }
 </style>

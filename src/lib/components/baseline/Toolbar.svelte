@@ -114,7 +114,7 @@
       {#snippet glyph()}<IconMenu />{/snippet}
     </Button>
   </div>
-
+  <div class="divider"></div>
   <div class="group" role="group" aria-label="Transport">
     <Button
       size="tool"
@@ -142,7 +142,7 @@
       <span>{formatTime(durationSec)}</span>
     </span>
   </div>
-
+  <div class="divider"></div>
   <div class="group" role="group" aria-label="History">
     <Button
       size="tool"
@@ -171,7 +171,7 @@
       {#snippet glyph()}<IconRedo />{/snippet}
     </Button>
   </div>
-
+  <div class="divider"></div>
   <div class="group" role="group" aria-label="Markers">
     <Button
       size="tool"
@@ -241,7 +241,7 @@
     {/if}
   </div>
 
-  <div class="group" id="view-group">
+  <div class="group view-group" id="view-group">
     <div class="group" role="group" aria-label="Zoom">
       <Button
         size="tool"
@@ -283,6 +283,7 @@
         {#snippet glyph()}<IconZoom zoom="fit" />{/snippet}
       </Button>
     </div>
+    <div class="divider"></div>
     <div class="group preview-group" role="radiogroup" aria-label="View">
       <Button
         size="tool"
@@ -324,7 +325,7 @@
         {#snippet glyph()}<IconLayout layout="bottom" />{/snippet}
       </Button>
     </div>
-
+    <div class="divider"></div>
     <div class="group">
       <Button
         size="tool"
@@ -380,13 +381,13 @@
     gap: 4px;
   }
 
-  .group + .group {
-    padding-left: 0.55rem;
-    border-left: 1px solid var(--panel-line);
-  }
-
-  #view-group {
-    margin-left: auto;
+  .divider {
+    display: inline-flex;
+    align-items: center;
+    background-color: var(--panel-line);
+    width: 1px;
+    height: 24px;
+    margin: 0 0.25rem;
   }
 
   .time {
@@ -404,5 +405,9 @@
   .sep {
     margin: 0 0.2em;
     color: var(--panel-highlight);
+  }
+
+  .view-group {
+    margin-left: auto;
   }
 </style>

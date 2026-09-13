@@ -34,6 +34,7 @@
   } from "$lib/components/baseline/Toolbar.svelte";
   import ViewPanel from "$lib/components/baseline/ViewPanel.svelte";
   import FileMenu, { type ExportChoice } from "$lib/components/FileMenu.svelte";
+  import Button from "$lib/components/baseline/Button.svelte";
   import SelectionActions from "$lib/components/SelectionActions.svelte";
   import TimelineStack from "$lib/components/TimelineStack.svelte";
   let tab = $state("cleanup");
@@ -820,8 +821,12 @@
   {#snippet aside()}
     <nav class="pane-tabs" aria-label="Editor panels">
       {#each ["cleanup", "edits"] as name (name)}
-        <button class:active={tab === name} onclick={() => (tab = name)}
-          >{name}</button
+        <Button
+          class="pane-tab"
+          variant="secondary"
+          toggle
+          pressed={tab === name}
+          onclick={() => (tab = name)}>{name}</Button
         >
       {/each}
     </nav>
@@ -840,8 +845,9 @@
         Cut markers affect every track. Preview edits to hear the result; Export
         applies them to new files.
       </p>
-      <button
+      <Button
         class="bulk-convert"
+        variant="primary"
         disabled={!editor.tracks.some(
           (track) => track.markedIntervals.length > 0,
         )}
@@ -849,8 +855,9 @@
           editor.convertAllSilencesToCuts();
           player.refreshIfPlaying();
         }}
+        tooltip
         title="Every per-track silence marker becomes a shared cut across all tracks"
-        >Convert all silences to shared cuts</button
+        >Convert all silences to shared cuts</Button
       >
       <p class="pane-hint compact">
         This clears the silence markers and places their combined ranges in the
@@ -860,14 +867,16 @@
       <h2>Marked cuts · {editor.cuts.length}</h2>
       {#each editor.cuts as cut (`${cut.start}-${cut.end}`)}
         <div class="edit-row">
-          <button onclick={() => player.audition(cut)}
-            >{cut.start.toFixed(1)} – {cut.end.toFixed(1)} s</button
+          <Button size="tool" variant="secondary" onclick={() => player.audition(cut)}
+            >{cut.start.toFixed(1)} – {cut.end.toFixed(1)} s</Button
           >
-          <button
+          <Button
+            size="tool"
+            variant="secondary"
             onclick={() => {
               editor.restoreCut(cut);
               player.refreshIfPlaying();
-            }}>Unmark</button
+            }}>Unmark</Button
           >
         </div>
       {/each}
@@ -875,18 +884,22 @@
         <h2>{track.speaker} · {track.markedIntervals.length} silences</h2>
         {#each track.markedIntervals as range (`${track.id}-${range.start}-${range.end}`)}
           <div class="edit-row">
-            <button
+            <Button
+              size="tool"
+              variant="secondary"
               onclick={() => {
                 editor.setActiveTrack(track.id);
                 player.audition(range);
-              }}>{range.start.toFixed(1)} – {range.end.toFixed(1)} s</button
+              }}>{range.start.toFixed(1)} – {range.end.toFixed(1)} s</Button
             >
-            <button
+            <Button
+              size="tool"
+              variant="secondary"
               onclick={() => {
                 editor.setSelection(range.start, range.end, [track.id]);
                 editor.unmarkSelection();
                 player.refreshIfPlaying();
-              }}>Unmark</button
+              }}>Unmark</Button
             >
           </div>
         {/each}
@@ -982,15 +995,9 @@
     padding: 0.65rem 0.75rem 0;
   }
 
-  .pane-tabs button {
+  .pane-tabs :global(.pane-tab) {
     flex: 1;
     text-transform: capitalize;
-    font-size: 0.75rem;
-  }
-
-  .pane-tabs button.active {
-    background: var(--amber);
-    color: var(--chassis);
   }
 
   .pane-content {
@@ -1028,11 +1035,7 @@
     margin-bottom: 0.4rem;
   }
 
-  .edit-row button {
-    font-size: 0.7rem;
-  }
-
-  .bulk-convert {
+  .pane-content :global(.bulk-convert) {
     width: 100%;
     margin-bottom: 0.5rem;
   }

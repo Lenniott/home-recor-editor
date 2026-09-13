@@ -2,6 +2,7 @@
   import { currentRegionNumber } from "../audio/markerNav";
   import { editor } from "../editor.svelte";
   import { player } from "../player";
+  import Button from "./baseline/Button.svelte";
   import IconCaret from "./icons/IconCaret.svelte";
 
   /**
@@ -108,9 +109,14 @@
     <span class="value">{editor.settings.bufferMs} ms</span>
   </label>
 
-  <button class="detect" onclick={runCleanup} disabled={!editor.hasAudio || editor.detectingAny}>
+  <Button
+    class="detect"
+    variant="primary"
+    onclick={runCleanup}
+    disabled={!editor.hasAudio || editor.detectingAny}
+  >
     {editor.detectingAny ? `Analyzing ${detectingTrack?.speaker} · ${Math.round((detectingTrack?.detectionProgress ?? 0) * 100)}%` : useVad ? "Run VAD + silence floor · all tracks" : "Run silence floor only · all tracks"}
-  </button>
+  </Button>
 
   <label class="control" title="Audio below this level is also marked, including very quiet speech. The combined pass uses speech detection and this quiet floor.">
     <span class="label">Quiet floor</span>
@@ -132,27 +138,33 @@
   <span class="count">{markerCount} region{markerCount === 1 ? "" : "s"}</span>
 
   <div class="control marker-nav" role="group" aria-label="Marker region navigation">
-    <button
-      type="button"
-      class="nav-step"
-      onclick={() => player.goToAdjacentMarkedRegion("prev")}
-      disabled={markerCount === 0}
+    <Button
+      size="tool"
+      variant="secondary"
+      icon="left"
+      label={false}
+      tooltip
       title="Previous marked region (shortcut: [)"
       aria-label="Previous marked region"
-    >
-      <IconCaret dir="left" />
-    </button>
-    <span class="nav-readout">{currentNumber ?? "–"} / {markerCount}</span>
-    <button
-      type="button"
-      class="nav-step"
-      onclick={() => player.goToAdjacentMarkedRegion("next")}
+      onclick={() => player.goToAdjacentMarkedRegion("prev")}
       disabled={markerCount === 0}
+    >
+      {#snippet glyph()}<IconCaret dir="left" />{/snippet}
+    </Button>
+    <span class="nav-readout">{currentNumber ?? "–"} / {markerCount}</span>
+    <Button
+      size="tool"
+      variant="secondary"
+      icon="left"
+      label={false}
+      tooltip
       title="Next marked region (shortcut: ])"
       aria-label="Next marked region"
+      onclick={() => player.goToAdjacentMarkedRegion("next")}
+      disabled={markerCount === 0}
     >
-      <IconCaret dir="right" />
-    </button>
+      {#snippet glyph()}<IconCaret dir="right" />{/snippet}
+    </Button>
   </div>
 
   {#each editor.tracks as lane}
@@ -169,11 +181,10 @@
   .label { flex: 1 0 100%; font-size: .75rem; color: var(--cream-dim); }
   input[type="range"] { flex: 1; min-width: 80px; width: 60%; }
   .value, .count { font: .7rem var(--font-mono); color: var(--cream-dim); }
-  .detect { font-size: .75rem; }
+  .silence-controls :global(.detect) { width: 100%; }
   .vad-option { display: flex; align-items: flex-start; gap: .65rem; padding: .7rem; border: 1px solid var(--panel-line); border-radius: 5px; }
   .vad-option span { display: grid; gap: .2rem; font-size: .75rem; }
   .vad-option small { color: var(--cream-dim); line-height: 1.35; }
   .marker-nav { justify-content: center; }
-  .nav-step { display: inline-flex; align-items: center; justify-content: center; padding: .4rem; }
   .detect-error { color: var(--in-color); font-size: .75rem; }
 </style>

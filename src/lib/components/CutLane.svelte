@@ -3,6 +3,7 @@
   import { player } from "../player";
   import { keptToSource } from "../audio/timelineMap";
   import { laneLayout } from "../audio/laneLayout";
+  import Button from "./baseline/Button.svelte";
   import IconCaret from "./icons/IconCaret.svelte";
 
   /**
@@ -145,22 +146,38 @@
   {#if !stripOnly}
   <div class="review">
     <span class="label">Suggestions</span>
-    <button type="button" class="icon-btn" onclick={() => step(-1)} disabled={suggestions.length === 0} aria-label="Previous suggestion">
-      <IconCaret dir="left" />
-    </button>
+    <Button
+      size="tool"
+      variant="secondary"
+      icon="left"
+      label={false}
+      aria-label="Previous suggestion"
+      onclick={() => step(-1)}
+      disabled={suggestions.length === 0}
+    >
+      {#snippet glyph()}<IconCaret dir="left" />{/snippet}
+    </Button>
     <span class="readout">
       {suggestions.length === 0 ? "0 / 0" : `${Math.min(index, suggestions.length - 1) + 1} / ${suggestions.length}`}
     </span>
-    <button type="button" class="icon-btn" onclick={() => step(1)} disabled={suggestions.length === 0} aria-label="Next suggestion">
-      <IconCaret dir="right" />
-    </button>
+    <Button
+      size="tool"
+      variant="secondary"
+      icon="left"
+      label={false}
+      aria-label="Next suggestion"
+      onclick={() => step(1)}
+      disabled={suggestions.length === 0}
+    >
+      {#snippet glyph()}<IconCaret dir="right" />{/snippet}
+    </Button>
     {#if current}
       <span class="range">{formatTime(current.start)}&ndash;{formatTime(current.end)}</span>
-      <button type="button" onclick={() => audition(current)}>Audition</button>
-      <button type="button" class="accept" onclick={() => accept(current)}>Mark cut</button>
-      <button type="button" class="dismiss" onclick={() => dismiss(current)}>Dismiss</button>
+      <Button size="tool" variant="secondary" onclick={() => audition(current)}>Audition</Button>
+      <Button size="tool" variant="primary" class="accept" onclick={() => accept(current)}>Mark cut</Button>
+      <Button size="tool" variant="secondary" class="dismiss" onclick={() => dismiss(current)}>Dismiss</Button>
     {/if}
-    <button type="button" onclick={acceptAll} disabled={suggestions.length === 0}>Mark all suggestions</button>
+    <Button size="tool" variant="secondary" onclick={acceptAll} disabled={suggestions.length === 0}>Mark all suggestions</Button>
   </div>
   {/if}
 </div>
@@ -253,25 +270,7 @@
     white-space: nowrap;
   }
 
-  .review button {
-    font-size: 0.72rem;
-    padding: 0.25rem 0.55rem;
-    white-space: nowrap;
-  }
-
-  .review .icon-btn {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    padding: 0.25rem;
-  }
-
-  .review .accept {
-    color: var(--out-color);
-    border-color: var(--out-color);
-  }
-
-  .review .dismiss {
+  .review :global(.dismiss) {
     color: var(--in-color);
     border-color: var(--in-color);
   }

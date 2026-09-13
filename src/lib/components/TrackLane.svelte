@@ -1,6 +1,7 @@
 <script lang="ts">
   import { editor, type TrackState } from "../editor.svelte";
   import { player } from "../player";
+  import Button from "./baseline/Button.svelte";
   import IconRadio from "./icons/IconRadio.svelte";
   import Waveform from "./Waveform.svelte";
 
@@ -55,17 +56,19 @@
     {#if compact}
       <span class="speaker-name">{track.speaker}</span>
     {:else}
-      <button
-        type="button"
-        class="activate"
-        class:active={isActive}
-        aria-pressed={isActive}
-        onclick={() => editor.setActiveTrack(track.id)}
+      <Button
+        size="tool"
+        variant="secondary"
+        toggle
+        pressed={isActive}
+        icon="left"
+        tooltip
         title="Point the silence controls at this track"
+        onclick={() => editor.setActiveTrack(track.id)}
       >
-        <IconRadio on={isActive} size={12} />
+        {#snippet glyph()}<IconRadio on={isActive} size={12} />{/snippet}
         {isActive ? "Editing" : "Edit"}
-      </button>
+      </Button>
       <input
         class="speaker"
         value={track.speaker}
@@ -75,7 +78,14 @@
       <span class="file" title={track.fileName ?? ""}>{track.fileName ?? "No recording"}</span>
       <span class="meta">{markedCount} silence{markedCount === 1 ? "" : "s"}</span>
       {#if editor.tracks.length > 1}
-        <button type="button" class="remove" onclick={remove} title="Remove this track">Remove</button>
+        <Button
+          size="tool"
+          variant="secondary"
+          class="remove"
+          tooltip
+          title="Remove this track"
+          onclick={remove}
+        >Remove</Button>
       {/if}
     {/if}
   </div>
@@ -131,21 +141,6 @@
     padding: 0.5rem 30px 0.5rem 0;
   }
 
-  .activate {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.3rem;
-    font-size: 0.7rem;
-    padding: 0.2rem 0.4rem;
-    white-space: nowrap;
-  }
-
-  .activate.active {
-    color: var(--chassis);
-    background: var(--amber);
-    border-color: var(--amber);
-  }
-
   .speaker {
     width: 100%;
     font-size: 0.8rem;
@@ -166,7 +161,7 @@
     white-space: nowrap;
   }
 
-  .remove {
+  .lane-label :global(.remove) {
     font-size: 0.68rem;
     padding: 0.15rem 0.4rem;
     color: var(--in-color);
@@ -198,5 +193,5 @@
     color: var(--cream-dim);
   }
 
-  @media(max-height: 650px) { .file, .meta, .remove { display: none; } }
+  @media(max-height: 650px) { .file, .meta, .lane-label :global(.remove) { display: none; } }
 </style>

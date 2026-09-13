@@ -5,6 +5,7 @@
   import { fitWindow } from "$lib/audio/markerNav";
   import { Transcription } from "$lib/transcription.svelte";
   import { selectedWordRange, wordsAtOffsets } from "$lib/transcript";
+  import Button from "$lib/components/baseline/Button.svelte";
 
   let {
     showSelectionActions = true,
@@ -428,22 +429,23 @@
     {#if !transcript.modelChecked}
       <span>Checking speech model…</span>
     {:else if !transcript.connected}
-      <button onclick={() => transcript.init()}>Retry connection</button>
+      <Button variant="secondary" onclick={() => transcript.init()}>Retry connection</Button>
     {:else if !transcript.modelReady}
-      <button onclick={() => transcript.download()} disabled={transcript.busy}
-        >Download English model · 142 MB</button
+      <Button variant="primary" onclick={() => transcript.download()} disabled={transcript.busy}
+        >Download English model · 142 MB</Button
       >
     {:else}
-      <button
+      <Button
+        size="tool"
+        variant="secondary"
         onclick={transcribeAll}
         disabled={!editor.hasAudio || transcript.busy}
       >
         {words.length ? "Transcribe all again" : "Transcribe all tracks"}
-      </button>
+      </Button>
     {/if}
     {#if transcript.error && transcript.modelReady && !transcript.busy}
-      <button onclick={() => transcript.download()}>Download model again</button
-      >
+      <Button variant="secondary" onclick={() => transcript.download()}>Download model again</Button>
     {/if}
     {#if transcript.busy}
       <progress
@@ -466,29 +468,31 @@
           ? ` ${Math.round(transcript.percent)}%`
           : ""}</span
       >
-      <button onclick={cancelAll} disabled={transcript.phase === "cancelling"}
-        >Cancel</button
+      <Button variant="secondary" onclick={cancelAll} disabled={transcript.phase === "cancelling"}
+        >Cancel</Button
       >
     {/if}
     {#if showSelectionActions && words.length && editor.hasSelection}
-      <button onclick={mark}
+      <Button variant="secondary" onclick={mark}
         >{editor.selectionOverlap === "marked" ? "Unmark" : "Mark"} selection
-        <kbd>M</kbd></button
+        <kbd>M</kbd></Button
       >
       {#if editor.selectionOverlap === "mixed"}
-        <button
+        <Button
+          variant="secondary"
           onclick={() => {
             clearNativeSelection();
             editor.unmarkSelection();
             player.refreshIfPlaying();
-          }}>Unmark selection</button
+          }}>Unmark selection</Button
         >
       {/if}
-      <button
+      <Button
+        variant="secondary"
         onclick={() => {
           clearNativeSelection();
           editor.clearSelection();
-        }}>Clear</button
+        }}>Clear</Button
       >
     {/if}
   </div>
@@ -554,11 +558,17 @@
     gap: 0.5rem;
   }
   .actions {
+    position: absolute;
+    top: 1rem;
+    right: 1rem;
+    z-index: 1;
     display: flex;
     flex-wrap: wrap;
     align-items: center;
+    justify-content: flex-end;
     gap: 0.6rem;
     font-size: 0.8rem;
+    max-width: calc(100% - 8rem);
   }
   p {
     font-size: 0.85rem;
