@@ -22,6 +22,31 @@ function mark(editor: EditorState, track: TrackState, start: number, end: number
   editor.markSelection(track);
 }
 
+describe("newProject", () => {
+  it("clears a session so a two-track save can replace a different open project", () => {
+    const saved = twoTrackEditor();
+    saved.setSpeaker(saved.tracks[0], "Alex");
+    const snapshot = saved.toProjectV2("/rec/dual.hre.json");
+
+    const editor = new EditorState();
+    editor.loadAudio(buffer(4), "other.wav", new Float32Array(64000), "/rec/other.wav", "c".repeat(64));
+    expect(editor.tracks).toHaveLength(1);
+
+    editor.newProject();
+    expect(editor.tracks).toHaveLength(0);
+    expect(editor.hasAudio).toBe(false);
+    expect(editor.projectPath).toBe(null);
+    expect(editor.fileName).toBe(null);
+    expect(editor.dirty).toBe(false);
+
+    editor.loadAudio(buffer(), "a.wav", new Float32Array(160000), "/rec/a.wav", "a".repeat(64));
+    editor.addTrack(buffer(), "b.wav", new Float32Array(160000), "/rec/b.wav", "b".repeat(64));
+    editor.applyProjectV2(snapshot, "/rec/dual.hre.json");
+    expect(editor.tracks).toHaveLength(2);
+    expect(editor.tracks[0].speaker).toBe("Alex");
+  });
+});
+
 describe("toProjectV2 / applyProjectV2 round-trip", () => {
   it("carries marks, settings, transcript, and workspace through a save/reload cycle", () => {
     const editor = new EditorState();

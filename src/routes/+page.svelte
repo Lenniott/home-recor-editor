@@ -139,10 +139,8 @@
   }
 
   /**
-   * Import one or two already-synced recordings. One file on an empty
-   * project also restores a sidecar if one sits next to it. One extra
-   * file on a single-track project adds the second lane; anything else
-   * starts a new session from the chosen files.
+   * Import one or two already-synced recordings as a new session. To add a
+   * second lane to the current project, use Add recording.
    */
   async function importRecordings(): Promise<void> {
     loadError = null;
@@ -160,27 +158,14 @@
       return;
     }
 
-    const addSecond = editor.canAddTrack && paths.length === 1;
     isLoading = true;
-    if (!addSecond) {
-      blockedSavePath = null;
-      saveError = null;
-    }
+    blockedSavePath = null;
+    saveError = null;
     try {
       const loaded = await Promise.all(
         paths.map((path) => readAndHashAudio(path)),
       );
       player.pause();
-      if (addSecond) {
-        editor.addTrack(
-          loaded[0].buffer,
-          loaded[0].name,
-          loaded[0].mono,
-          loaded[0].path,
-          loaded[0].sha256,
-        );
-        return;
-      }
       const [first, second] = loaded;
       editor.loadAudio(
         first.buffer,
@@ -203,6 +188,49 @@
     } finally {
       isLoading = false;
     }
+  }
+
+  async function addRecording(): Promise<void> {
+    if (!editor.canAddTrack) return;
+    loadError = null;
+    let path: string | null;
+    try {
+      path = await pickAudio("Add a synced recording");
+    } catch (err) {
+      loadError = describeError(err);
+      return;
+    }
+    if (!path) return;
+    isLoading = true;
+    try {
+      const loaded = await readAndHashAudio(path);
+      player.pause();
+      editor.addTrack(
+        loaded.buffer,
+        loaded.name,
+        loaded.mono,
+        loaded.path,
+        loaded.sha256,
+      );
+    } catch (err) {
+      loadError = describeError(err);
+    } finally {
+      isLoading = false;
+    }
+  }
+
+  function startNewProject(): void {
+    if (
+      editor.hasAudio &&
+      editor.dirty &&
+      !confirm("Discard unsaved changes and start a new project?")
+    )
+      return;
+    player.pause();
+    editor.newProject();
+    loadError = null;
+    saveError = null;
+    blockedSavePath = null;
   }
 
   /**
@@ -290,7 +318,11 @@
       }
       // Moved or renamed since the project was saved — ask where it went.
       const relocated = await pickAudio(`Locate "${track.source.name}"`);
-      if (!relocated) return;
+      if (!relocated) {
+        throw new Error(
+          `Couldn't locate "${track.source.name}". The current project has not been replaced.`,
+        );
+      }
       loaded.push(await readAndHashAudio(relocated));
     }
     if (loaded.length === 0) return;
@@ -749,11 +781,14 @@
         {exportError}
         canSave={!!editor.filePath}
         canExport={editor.hasAudio}
+        canAddRecording={editor.canAddTrack}
         twoTrack={editor.tracks.length > 1}
         onSave={() => saveProject()}
         onSaveAs={saveProjectAs}
+        onNew={startNewProject}
         onOpen={openProject}
         onImport={importRecordings}
+        onAddRecording={addRecording}
         onExport={startExport}
         onExportReset={resetExportUi}
       />

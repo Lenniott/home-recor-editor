@@ -360,6 +360,13 @@ fn engine_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
         .join("whisper-cli"))
 }
 
+fn wav_body_error(bytes: &[u8]) -> Result<(), String> {
+    if bytes.len() < 44 || bytes.get(..4) != Some(&b"RIFF"[..]) || bytes.get(8..12) != Some(&b"WAVE"[..]) {
+        return Err("Invalid WAV audio".into());
+    }
+    Ok(())
+}
+
 #[tauri::command]
 pub fn start_transcription(
     app: tauri::AppHandle,
@@ -375,9 +382,7 @@ pub fn start_transcription(
         tauri::ipc::InvokeBody::Raw(bytes) => bytes,
         _ => return Err("Expected WAV audio".into()),
     };
-    if bytes.len() < 44 || &bytes[..4] != b"RIFF" || &bytes[8..12] != b"WAVE" {
-        return Err("Invalid WAV audio".into());
-    }
+    wav_body_error(bytes)?;
     let cancel = reserve(&app, &id)?;
     let bytes = bytes.clone();
     thread::spawn(move || {
@@ -490,5 +495,18 @@ mod tests {
             assert!(verify_model(&temp.0.join("missing.bin")).is_err());
         }
         assert!(!path.exists());
+    }
+
+    #[test]
+    fn start_transcription_rejects_body_without_riff() {
+        assert_eq!(
+            wav_body_error(b"not a wave file"),
+            Err("Invalid WAV audio".into())
+        );
+        assert_eq!(wav_body_error(&[0; 43]), Err("Invalid WAV audio".into()));
+        let mut ok = vec![0u8; 44];
+        ok[..4].copy_from_slice(b"RIFF");
+        ok[8..12].copy_from_slice(b"WAVE");
+        assert_eq!(wav_body_error(&ok), Ok(()));
     }
 }

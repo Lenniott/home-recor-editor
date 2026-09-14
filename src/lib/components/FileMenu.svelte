@@ -15,11 +15,14 @@
     exportError = null,
     canSave = false,
     canExport = false,
+    canAddRecording = false,
     twoTrack = false,
     onSave,
     onSaveAs,
     onOpen,
+    onNew,
     onImport,
+    onAddRecording,
     onExport,
     onExportReset,
     open = $bindable(false),
@@ -33,11 +36,14 @@
     exportError?: string | null;
     canSave?: boolean;
     canExport?: boolean;
+    canAddRecording?: boolean;
     twoTrack?: boolean;
     onSave: () => void;
     onSaveAs: () => void;
     onOpen: () => void;
+    onNew: () => void;
     onImport: () => void;
+    onAddRecording: () => void;
     onExport: (choice: ExportChoice) => Promise<void>;
     onExportReset: () => void;
     open?: boolean;
@@ -118,12 +124,14 @@
   {/if}
   {#if open}
     <div class="menu" role="menu">
+      <button type="button" role="menuitem" disabled={isLoading} onclick={() => run(onNew)}>New</button>
       <button type="button" role="menuitem" disabled={!canSave || isSaving} onclick={() => run(onSave)}>
         {isSaving ? "Saving…" : "Save"}
       </button>
       <button type="button" role="menuitem" disabled={!canSave || isSaving} onclick={() => run(onSaveAs)}>Save as</button>
       <button type="button" role="menuitem" disabled={isLoading} onclick={() => run(onOpen)}>Open</button>
       <button type="button" role="menuitem" disabled={isLoading} onclick={() => run(onImport)}>Import</button>
+      <button type="button" role="menuitem" disabled={isLoading || !canAddRecording} onclick={() => run(onAddRecording)}>Add recording</button>
       <button type="button" role="menuitem" disabled={!canExport || isExporting} onclick={openExport}>
         {isExporting ? "Exporting…" : "Export"}
       </button>

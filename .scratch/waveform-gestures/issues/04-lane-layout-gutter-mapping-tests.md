@@ -4,7 +4,7 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** done
 
 - [ ] Round-trip cases for gutter, hidden spans, and max gutter budget
 - [ ] Zero view duration or zero width: no throw, documented fallback

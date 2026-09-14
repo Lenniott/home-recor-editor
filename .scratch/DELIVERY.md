@@ -144,6 +144,21 @@ flowchart TB
 3. Open worker with: ticket path, `.scratch/WORKER.md`, `.scratch/<area>/TDD.md` section for that NN, locked decisions above.
 4. Worker completion criterion: named first-red test went red then green; all ticket ACs have tests; `npm test` and `npm run check` green; for rust tickets `cargo test --manifest-path src-tauri/Cargo.toml`; no extra files.
 5. Orchestrator: mark ticket done, merge order, next frontier.
+6. **Wave finish (always say this to the user).** After the last ticket in a wave is green, the parent message must end with **Manual test**. Never omit the heading. If nothing in the packaged app changed for a user, write `Manual test: none` and one line why (tests-only, dead-code delete, extract with the same branches). If something is listen/click/save/export visible, list numbered steps in the real Tauri window: starting state, action, what they should hear or see. Cover only what this wave could have broken. Do not dump a full regression script.
+
+## Wave finish template
+
+```
+### Manual test
+1. …
+```
+
+or
+
+```
+### Manual test
+none — <one reason>
+```
 
 ## What the orchestrator forbids
 

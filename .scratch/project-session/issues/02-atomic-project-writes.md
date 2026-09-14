@@ -4,7 +4,7 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** done
 
 - [ ] Native write test: interrupt mid-write leaves the previous complete file or the new complete file, never partial JSON
 - [ ] Failed write surfaces a save error in the session chrome

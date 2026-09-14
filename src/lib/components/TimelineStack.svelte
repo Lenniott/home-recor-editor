@@ -102,7 +102,7 @@
   {#if editor.tracks.length === 0}
     <div class="empty">
       <p>Start with your speaker recordings</p>
-      <p class="hint">Import one or two synced audio files to begin cleanup.</p>
+      <p class="hint">File → New, then Import one or two synced recordings. Open a saved .hre.json to come back to a project.</p>
     </div>
   {:else}
     {#if !compact}

@@ -4,7 +4,7 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** done
 
 - [ ] Sample-level cases: muted spans, shared cuts, overlapping mute and cut, stereo channels
 - [ ] Cuts covering the whole duration produce the empty-export outcome

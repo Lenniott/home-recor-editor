@@ -26,7 +26,7 @@ Follow TDD: red before green, one test then minimal code, tests at the **seam** 
 3. Write the smallest implementation that makes that test pass. No extra methods “for later tickets”.
 4. Repeat for the next AC as the next red test, one at a time, using **Next reds** in `TDD.md` as the menu — pick the first still-failing AC, not all of them at once.
 5. When ACs are checked: `npm test` and `npm run check`. Rust tickets also `cargo test --manifest-path src-tauri/Cargo.toml`.
-6. Stop. Do not refactor unless the ticket is a delete/align-comments ticket. Leave a 2–4 sentence note: tests added, behavior now true, anything you refused to expand.
+6. Stop. Do not refactor unless the ticket is a delete/align-comments ticket. Leave a 2–4 sentence note: tests added, behavior now true, anything you refused to expand. Add **Manual test:** either `none — <reason>` or 2–5 steps for the Tauri app (what to click, what to hear/see). The orchestrator copies that into the wave-finish message.
 
 ## Done
 

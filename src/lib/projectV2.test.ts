@@ -138,6 +138,15 @@ describe("parsePodcastProject / serializePodcastProject round-trip", () => {
     expect(() => parsePodcastProject(JSON.stringify(p))).toThrow();
   });
 
+  it("drops zero-length marks instead of rejecting the project", () => {
+    const p = project({
+      tracks: [track({ manualSilences: [{ start: 1, end: 1 }, { start: 2, end: 3 }] })],
+    });
+    expect(parsePodcastProject(serializePodcastProject(p)).tracks[0].manualSilences).toEqual([
+      { start: 2, end: 3 },
+    ]);
+  });
+
   it("clamps sidebarWidth into its allowed range", () => {
     const p = project({ workspace: { ...project().workspace, sidebarWidth: 10 } });
     expect(parsePodcastProject(JSON.stringify(p)).workspace.sidebarWidth).toBe(260);

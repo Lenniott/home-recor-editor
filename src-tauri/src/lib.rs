@@ -130,6 +130,29 @@ mod tests {
     fn rejects_a_truncated_escape() {
         assert!(percent_decode("/tmp/a%2").is_err());
     }
+
+    #[test]
+    fn write_text_file_replaces_only_after_full_contents_are_on_disk() {
+        let dir = std::env::temp_dir().join(format!("hre-atomic-write-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("project.json");
+        std::fs::write(&path, "{\"v\":1}").unwrap();
+        super::write_text_file(path.to_str().unwrap(), "{\"v\":2,\"ok\":true}").unwrap();
+        let body = std::fs::read_to_string(&path).unwrap();
+        assert_eq!(body, "{\"v\":2,\"ok\":true}");
+        let leftovers: Vec<_> = std::fs::read_dir(&dir)
+            .unwrap()
+            .filter_map(|entry| entry.ok())
+            .filter(|entry| {
+                entry
+                    .file_name()
+                    .to_string_lossy()
+                    .contains(".tmp-")
+            })
+            .collect();
+        assert!(leftovers.is_empty(), "temp file left behind: {leftovers:?}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]

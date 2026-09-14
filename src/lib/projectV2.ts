@@ -74,7 +74,7 @@ export function cutSuggestions(tracks: TrackDocument[], duration: number, cuts: 
 }
 const finite = (x: unknown): x is number => typeof x === 'number' && Number.isFinite(x);
 function ranges(value: unknown, duration: number): Range[] {
-  if (!Array.isArray(value) || value.some(r => !r || !finite(r.start) || !finite(r.end) || r.start < 0 || r.end <= r.start || r.end > duration + 1e-6)) throw new Error('Invalid project edit ranges');
+  if (!Array.isArray(value) || value.some(r => !r || !finite(r.start) || !finite(r.end) || r.start < 0 || r.end > duration + 1e-6)) throw new Error('Invalid project edit ranges');
   return normalize(value, duration);
 }
 /** Reject malformed projects before replacing the current session. No silent loss of edits. */

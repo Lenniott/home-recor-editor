@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { removeMarked, silenceMarked } from "./applyEdits";
+import { removeMarked, renderEdited, silenceMarked } from "./applyEdits";
 import { MUTE_FADE_SEC } from "./playbackPlan";
 
 describe("silenceMarked", () => {
@@ -122,5 +122,33 @@ describe("removeMarked", () => {
     const [outLeft, outRight] = removeMarked([left, right], sampleRate, [{ start: 2, end: 4 }]);
     expect(outLeft.length).toBe(800);
     expect(outRight.length).toBe(800);
+  });
+});
+
+describe("renderEdited", () => {
+  it("silences then cuts the same samples the playback plan would duck and skip", () => {
+    const sampleRate = 100;
+    const source = new Float32Array(sampleRate * 2).fill(0.8);
+    const muted = [{ start: 0.4, end: 0.9 }];
+    const cuts = [{ start: 0.8, end: 1.1 }];
+    const [exported] = renderEdited([source], sampleRate, muted, cuts);
+
+    // 2s minus a 0.3s cut → 1.7s at 100 Hz.
+    expect(exported.length).toBe(170);
+    // Source 0.2s is before the mute and the cut, so it is copied at full level.
+    expect(exported[20]).toBeCloseTo(0.8);
+    // Duck reaches 0 at the mute start (0.4s kept). The mute then overlaps the
+    // cut-splice fade, so later frames in the mute are not held at 0.
+    expect(exported[40]).toBeCloseTo(0);
+    // After the cut, source 1.2s lands at kept 0.9s (1.2 − 0.3), past the 0.1s splice fade-in.
+    expect(exported[90]).toBeCloseTo(0.8);
+  });
+
+  it("throws when cuts cover the whole duration", () => {
+    const sampleRate = 100;
+    const source = new Float32Array(sampleRate).fill(0.8);
+    expect(() => renderEdited([source], sampleRate, [], [{ start: 0, end: 1 }])).toThrow(
+      "Nothing left to export.",
+    );
   });
 });

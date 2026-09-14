@@ -4,7 +4,7 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** done
 
 - [ ] Invalid payloads return stable errors
 - [ ] Job slot remains free for a following valid start

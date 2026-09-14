@@ -659,6 +659,23 @@ export class EditorState {
   }
 
   /**
+   * Empty session: no recordings, no project path. File → New, so the next
+   * Import or Open is not stacked onto whatever was already loaded.
+   */
+  newProject(): void {
+    this.nextTrackNumber = 1;
+    this.tracks = [];
+    this.activeTrackId = null;
+    this.cuts = [];
+    this.dismissed = [];
+    this.resetSessionState(0);
+    this.projectPath = null;
+    this.history.clear();
+    this.revision = 0;
+    this.savedRevision = 0;
+  }
+
+  /**
    * Add a second, already-synced recording as its own lane (same start
    * time; a different length is fine — see `cutSuggestions`). Not
    * undoable, same as `loadAudio`: it brings in audio, which no undo
