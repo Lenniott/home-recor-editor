@@ -83,7 +83,7 @@ Merge a wave before starting work that lists those tickets as blockers. Inside a
 
 | Ticket | Mutex |
 |--------|-------|
-| project-session 01 | PAGE |
+| project-session 01 | PAGE (**done**) |
 | transcript-session 01 | EDITOR |
 | playback 02 | PLAYER (after 01 merges) |
 | waveform 01 | WAVEFORM |

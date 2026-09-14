@@ -20,26 +20,26 @@ Read this file when the user says **continue**, **delivery**, **TDD tickets**, o
 | Item | State |
 |------|--------|
 | Branch | `tdd/program` |
-| Latest | Wave 0 + File New / Add recording / Import-replaces / Locate error / parse drops zero-width marks |
+| Latest | project-session 01: `openRecordings` / `saveProject` with injected desktop adapter. Missing companion = empty session; v2 companion restores marks+transcript and sets `projectPath`; unreadable companion errors, blocks Save, Save As still writes. Page File→Import (one file) and Save use that seam. Legacy v1 companion restore is ticket 05. |
 | Wave 0 | **done** |
-| Frontier | Wave 1 |
+| Wave 1 | in progress (PAGE free) |
+| Frontier | Wave 1 remainder |
 
 ## Next (Wave 1)
 
 | Ticket | Mutex | Blocked by |
 |--------|-------|------------|
-| project-session 01 | PAGE | none |
 | transcript-session 01 | EDITOR | none |
 | playback 02 | PLAYER | playback 01 **done** |
 | waveform 01 | WAVEFORM | none |
 | whisper 01 | RUST_WHISPER | whisper 02 **done** |
 
-`vad-options 01` after transcript-session 01 (`EDITOR`). Then Wave 2 in `DELIVERY.md`.
+`vad-options 01` after transcript-session 01 (`EDITOR`). Wave 2 (`project-session` 03–05, PAGE, base = 01) in `DELIVERY.md`.
 
 ## Product facts the next slice must keep
 
 - File → **New** clears the session (confirm if dirty).
-- File → **Import** replaces the session (1–2 recordings).
+- File → **Import** replaces the session (1–2 recordings). One file: a current-format companion beside it restores marks/transcript and becomes the save path; missing companion is a blank session; unreadable companion shows an error and blocks Save to that path (Save As still works).
 - File → **Add recording** attaches lane 2.
 - File → **Open** is current-format `.hre.json`; Locate on missing sources; cancel leaves the current project and shows an error.
 - Zero-width marks in JSON are dropped on parse.

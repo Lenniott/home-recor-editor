@@ -4,12 +4,12 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] Missing companion file → empty session, no error
-- [ ] Valid current-format companion → marks (and transcript if present) restored; save location is that companion file
-- [ ] Unreadable companion → error plus Save blocked to that location; Save As still writes a new file
-- [ ] Orchestration is testable with injected read/write/pick adapters (no real dialogs)
+- [x] Missing companion file → empty session, no error
+- [x] Valid current-format companion → marks (and transcript if present) restored; save location is that companion file
+- [x] Unreadable companion → error plus Save blocked to that location; Save As still writes a new file
+- [x] Orchestration is testable with injected read/write/pick adapters (no real dialogs)
 
 ---
 

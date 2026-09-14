@@ -17,7 +17,7 @@ vi.stubGlobal(
   },
 );
 
-HTMLCanvasElement.prototype.getContext = () =>
+HTMLCanvasElement.prototype.getContext = (() =>
   ({
     setTransform() {},
     clearRect() {},
@@ -34,7 +34,7 @@ HTMLCanvasElement.prototype.getContext = () =>
     clip() {},
     rect() {},
     scale() {},
-  }) as unknown as CanvasRenderingContext2D;
+  }) as unknown as CanvasRenderingContext2D) as unknown as typeof HTMLCanvasElement.prototype.getContext;
 
 let component: ReturnType<typeof mount>;
 let target: HTMLDivElement;

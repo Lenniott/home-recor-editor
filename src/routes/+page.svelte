@@ -20,13 +20,15 @@
   } from "$lib/exportNames";
   import { sha256Hex } from "$lib/hash";
   import { player } from "$lib/player";
-  import { parseProjectFile, sidecarPath } from "$lib/projectFile";
   import {
     parsePodcastProject,
     resolveSourcePath,
-    serializePodcastProject,
     type PodcastProject,
   } from "$lib/projectV2";
+  import {
+    openRecordings,
+    saveProject as writeProjectFile,
+  } from "$lib/projectSession";
   import { vadDetector } from "$lib/vadDetector";
   import PageLayout from "$lib/components/baseline/PageLayout.svelte";
   import Toolbar, {
@@ -94,20 +96,38 @@
       editor.cutSuggestionList.length > 0,
   );
 
-  /**
-   * Read, hash, and decode a recording in that order: `decodeAudioFile`
-   * takes ownership of (detaches) `bytes`' backing buffer, so hashing has
-   * to see the raw bytes first — see `hash.ts`/`decode.ts`.
-   */
-  async function readAndHashAudio(path: string): Promise<LoadedAudio> {
+  async function readAudioBytes(path: string): Promise<Uint8Array> {
     // The command returns a raw ipc::Response, which invoke() surfaces as an
     // ArrayBuffer. Falls back to a plain number array on platforms where that
     // isn't supported, matching how @tauri-apps/plugin-fs handles the same case.
     const raw = await invoke<ArrayBuffer | number[]>("read_audio_file", {
       path,
     });
-    const bytes =
-      raw instanceof ArrayBuffer ? new Uint8Array(raw) : Uint8Array.from(raw);
+    return raw instanceof ArrayBuffer
+      ? new Uint8Array(raw)
+      : Uint8Array.from(raw);
+  }
+
+  function tauriDesktop() {
+    return {
+      readAudio: readAudioBytes,
+      readText: (path: string) =>
+        invoke<string | null>("read_text_file", { path }),
+      writeText: async (path: string, contents: string) => {
+        await invoke("write_text_file", { path, contents });
+      },
+      decodeAudio: (bytes: Uint8Array) =>
+        decodeAudioFile(bytes, player.getContext()),
+    };
+  }
+
+  /**
+   * Read, hash, and decode a recording in that order: `decodeAudioFile`
+   * takes ownership of (detaches) `bytes`' backing buffer, so hashing has
+   * to see the raw bytes first — see `hash.ts`/`decode.ts`.
+   */
+  async function readAndHashAudio(path: string): Promise<LoadedAudio> {
+    const bytes = await readAudioBytes(path);
     const sha256 = await sha256Hex(bytes);
     const buffer = await decodeAudioFile(bytes, player.getContext());
     return {
@@ -162,10 +182,20 @@
     blockedSavePath = null;
     saveError = null;
     try {
+      player.pause();
+      if (paths.length === 1) {
+        const result = await openRecordings({
+          files: paths,
+          desktop: tauriDesktop(),
+          editor,
+        });
+        loadError = result.error;
+        blockedSavePath = result.blockedSavePath;
+        return;
+      }
       const loaded = await Promise.all(
         paths.map((path) => readAndHashAudio(path)),
       );
-      player.pause();
       const [first, second] = loaded;
       editor.loadAudio(
         first.buffer,
@@ -182,7 +212,6 @@
           second.path,
           second.sha256,
         );
-      else await loadProjectIfPresent(first);
     } catch (err) {
       loadError = describeError(err);
     } finally {
@@ -231,54 +260,6 @@
     loadError = null;
     saveError = null;
     blockedSavePath = null;
-  }
-
-  /**
-   * Restore a previously saved sidecar for a just-opened recording, if one
-   * exists. A missing or unreadable sidecar is the normal first-open case,
-   * so it silently leaves the freshly-loaded (empty) marks in place rather
-   * than surfacing an error.
-   */
-  async function loadProjectIfPresent(loaded: LoadedAudio): Promise<void> {
-    const path = sidecarPath(loaded.path);
-    try {
-      const text = await invoke<string | null>("read_text_file", { path });
-      if (text) await applyProjectText(text, path, loaded);
-    } catch (error) {
-      blockedSavePath = path;
-      loadError =
-        describeError(error) +
-        " The saved project is protected; use Save As for a new project.";
-    }
-  }
-
-  /**
-   * Apply a loaded project's text against a just-opened recording, trying
-   * the current (version 2) format first and falling back to a version-1
-   * sidecar from before `projectV2.ts` existed. Silently leaves the
-   * freshly-loaded (empty) marks in place if neither format parses — a
-   * corrupt sidecar should never block opening the audio itself.
-   */
-  async function applyProjectText(
-    text: string,
-    path: string,
-    preloaded: LoadedAudio,
-  ): Promise<void> {
-    let project: PodcastProject;
-    try {
-      project = parsePodcastProject(text);
-    } catch {
-      // Not a valid version-2 project — fall through to the legacy format.
-      const legacy = parseProjectFile(text);
-      if (!legacy) throw new Error("The saved project could not be read.");
-      if (Math.abs(legacy.durationSec - preloaded.buffer.duration) > 0.01)
-        throw new Error(
-          "The legacy project duration differs from this recording. Locate the original audio before reusing its marks.",
-        );
-      editor.applyLegacyProject(legacy, path);
-      return;
-    }
-    await openParsedProject(project, path, preloaded, false);
   }
 
   /**
@@ -409,24 +390,16 @@
    */
   async function saveProject(destination?: string): Promise<void> {
     if (!editor.filePath || isSaving) return;
-    const path =
-      destination ?? editor.projectPath ?? sidecarPath(editor.filePath);
-    if (path === blockedSavePath) {
-      saveError =
-        "This project could not be restored. Use Save As to preserve the existing file.";
-      return;
-    }
-    const owner = editor.tracks[0];
     isSaving = true;
     saveError = null;
-    const revision = editor.revision;
     try {
-      const contents = serializePodcastProject(editor.toProjectV2(path));
-      await invoke("write_text_file", { path, contents });
-      if (editor.tracks[0] === owner) {
-        editor.projectPath = path;
-        editor.markSaved(revision);
-      }
+      const result = await writeProjectFile({
+        editor,
+        desktop: tauriDesktop(),
+        blockedSavePath,
+        destination,
+      });
+      saveError = result.error;
     } catch (err) {
       saveError = describeError(err);
     } finally {
