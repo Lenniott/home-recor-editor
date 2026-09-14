@@ -263,6 +263,14 @@ describe("conversation transcript", () => {
     const saved = editor.toProjectV2("/tmp/test.hre.json");
     expect(saved.tracks.map(t => t.transcript.status)).toEqual(["complete","complete"]);
   });
+  it("onSettled writes through applyTranscript", () => {
+    const apply = vi.spyOn(editor, "applyTranscript");
+    button("Transcribe all").click(); flushSync();
+    const words = [{ text: "Hi", start: 0, end: 0.2 }];
+    TranscriptionMock.latest.onSettled?.(words); flushSync();
+    expect(apply).toHaveBeenCalledWith(editor.tracks[0].id, words, "complete");
+    apply.mockRestore();
+  });
   it("discards stale results after the recording is replaced", () => {
     button("Transcribe all").click(); flushSync();
     const runner = TranscriptionMock.latest;

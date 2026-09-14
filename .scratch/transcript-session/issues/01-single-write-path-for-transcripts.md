@@ -4,11 +4,11 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] Queued job updates the track that started it, not only the active lane
-- [ ] Re-applying identical words and status does not bump dirty
-- [ ] Replacing audio still rejects stale results
+- [x] Queued job updates the track that started it, not only the active lane
+- [x] Re-applying identical words and status does not bump dirty
+- [x] Replacing audio still rejects stale results
 
 ---
 

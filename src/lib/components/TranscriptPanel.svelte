@@ -53,9 +53,7 @@
       editor.tracks.includes(running) &&
       running.audioBuffer === runningAudio
     ) {
-      running.transcriptWords = result;
-      running.transcriptStatus = "complete";
-      editor.revision++;
+      editor.applyTranscript(running.id, result, "complete");
     }
     if (!result) queue = [];
     nextTrack();

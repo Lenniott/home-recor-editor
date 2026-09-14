@@ -71,6 +71,10 @@ const NEGATIVE_THRESHOLD_MARGIN = 0.15;
 /** The schema tolerates one or two tracks — see `parsePodcastProject`. */
 export const MAX_TRACKS = 2;
 
+function sameTranscriptWords(a: TranscriptWord[], b: TranscriptWord[]): boolean {
+  return a.length === b.length && a.every((word, i) => word.text === b[i].text && word.start === b[i].start && word.end === b[i].end);
+}
+
 /**
  * Shared merge trigger for both ways two marked regions can end up
  * overlapping: a finished drag-select whose range overlaps existing marked
@@ -119,7 +123,7 @@ export class TrackState {
   detectionProgress: number = $state(0);
   detectionError: string | null = $state(null);
 
-  /** Transcript content, owned here so it survives a save/reload — see `EditorState.setTranscript`. */
+  /** Transcript content, owned here so it survives a save/reload — see `EditorState.applyTranscript`. */
   transcriptWords: TranscriptWord[] = $state([]);
   transcriptStatus: "missing" | "complete" = $state("missing");
 
@@ -901,7 +905,17 @@ export class EditorState {
   setTranscript(words: TranscriptWord[], status: "missing" | "complete"): void {
     const track = this.activeTrack;
     if (!track) return;
-    if (track.transcriptWords === words && track.transcriptStatus === status) return;
+    this.applyTranscript(track.id, words, status);
+  }
+
+  /**
+   * Attach words to the track that started the job, even if another lane
+   * is active. The panel calls this seam instead of writing track fields.
+   */
+  applyTranscript(trackId: string, words: TranscriptWord[], status: "missing" | "complete"): void {
+    const track = this.tracks.find((t) => t.id === trackId);
+    if (!track) return;
+    if (track.transcriptStatus === status && sameTranscriptWords(track.transcriptWords, words)) return;
     track.transcriptWords = words;
     track.transcriptStatus = status;
     this.revision++;

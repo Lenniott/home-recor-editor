@@ -15,26 +15,26 @@ Read this file when the user says **continue**, **delivery**, **TDD tickets**, o
 7. Commit code + this handoff together. Do not ask the user to update docs for the next agent; that is this step. Push only if they asked.
 8. End the user message with **Manual test** (see `DELIVERY.md`).
 
-## Status (2026-09-14)
+## Status (2026-09-15)
 
 | Item | State |
 |------|--------|
 | Branch | `tdd/program` |
-| Latest | project-session 01: `openRecordings` / `saveProject` with injected desktop adapter. Missing companion = empty session; v2 companion restores marks+transcript and sets `projectPath`; unreadable companion errors, blocks Save, Save As still writes. Page File→Import (one file) and Save use that seam. Legacy v1 companion restore is ticket 05. |
+| Latest | transcript-session 01: `EditorState.applyTranscript(trackId, words, status)` is the only write path from the transcript pane. Writes the job owner, not the active lane; identical words+status do not bump `revision`; panel `onSettled` calls the method; stale results after `loadAudio` still discarded. `setTranscript` delegates. Queue failure policy is ticket 03. |
 | Wave 0 | **done** |
-| Wave 1 | in progress (PAGE free) |
+| Wave 1 | in progress (PAGE free, EDITOR free) |
 | Frontier | Wave 1 remainder |
 
 ## Next (Wave 1)
 
 | Ticket | Mutex | Blocked by |
 |--------|-------|------------|
-| transcript-session 01 | EDITOR | none |
+| vad-options 01 | EDITOR | transcript-session 01 **done** |
 | playback 02 | PLAYER | playback 01 **done** |
 | waveform 01 | WAVEFORM | none |
 | whisper 01 | RUST_WHISPER | whisper 02 **done** |
 
-`vad-options 01` after transcript-session 01 (`EDITOR`). Wave 2 (`project-session` 03–05, PAGE, base = 01) in `DELIVERY.md`.
+Wave 2 (`project-session` 03–05, PAGE, base = 01) in `DELIVERY.md`.
 
 ## Product facts the next slice must keep
 

@@ -498,6 +498,27 @@ describe("setTranscript", () => {
   });
 });
 
+describe("applyTranscript", () => {
+  it("applyTranscript writes words to the given track when another lane is active", () => {
+    const editor = twoTrackEditor();
+    editor.setActiveTrack(editor.tracks[0].id);
+    editor.markSaved(editor.revision);
+    editor.applyTranscript(editor.tracks[1].id, [{ text: "Hi", start: 0, end: 0.2 }], "complete");
+    expect(editor.tracks[1].transcriptWords).toEqual([{ text: "Hi", start: 0, end: 0.2 }]);
+    expect(editor.activeTrackId).toBe(editor.tracks[0].id);
+    expect(editor.dirty).toBe(true);
+  });
+
+  it("does not bump revision when words and status are identical", () => {
+    const editor = new EditorState();
+    editor.loadAudio(buffer(), "a.wav", new Float32Array(160000), "/rec/a.wav", "a".repeat(64));
+    editor.applyTranscript(editor.tracks[0].id, [{ text: "Hi", start: 0, end: 0.2 }], "complete");
+    const revisionAfterFirst = editor.revision;
+    editor.applyTranscript(editor.tracks[0].id, [{ text: "Hi", start: 0, end: 0.2 }], "complete");
+    expect(editor.revision).toBe(revisionAfterFirst);
+  });
+});
+
 describe("cleanup review workflow", () => {
   it("keeps new cut markers on the full timeline until edited preview is requested", () => {
     const e = twoTrackEditor();
