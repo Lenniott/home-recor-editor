@@ -1,5 +1,5 @@
 import { mixToMono } from "./audio/decode";
-import type { EditorState } from "./editor.svelte";
+import { MAX_TRACKS, type EditorState } from "./editor.svelte";
 import { sha256Hex } from "./hash";
 import { sidecarPath } from "./projectFile";
 import { parsePodcastProject, serializePodcastProject } from "./projectV2";
@@ -20,23 +20,96 @@ function describeError(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
+async function readRecording(
+  path: string,
+  desktop: DesktopAdapter,
+) {
+  const bytes = await desktop.readAudio(path);
+  const sha256 = await sha256Hex(bytes);
+  const buffer = await desktop.decodeAudio(bytes);
+  return {
+    buffer,
+    sha256,
+    path,
+    name: path.split(/[\\/]/).pop() ?? path,
+    mono: mixToMono(buffer),
+  };
+}
+
+function sessionResult(
+  editor: EditorState,
+  error: string | null,
+  blockedSavePath: string | null,
+) {
+  return {
+    tracks: editor.tracks,
+    projectPath: editor.projectPath,
+    error,
+    blockedSavePath,
+  };
+}
+
 export async function openRecordings({
   files,
   desktop,
   editor,
+  blockedSavePath = null,
 }: {
   files: string[];
   desktop: DesktopAdapter;
   editor: EditorState;
+  blockedSavePath?: string | null;
 }) {
-  const path = files[0];
-  const bytes = await desktop.readAudio(path);
-  const sha256 = await sha256Hex(bytes);
-  const buffer = await desktop.decodeAudio(bytes);
-  const name = path.split(/[\\/]/).pop() ?? path;
-  editor.loadAudio(buffer, name, mixToMono(buffer), path, sha256);
+  if (files.length > MAX_TRACKS) {
+    return sessionResult(
+      editor,
+      `Import at most ${MAX_TRACKS} recordings.`,
+      blockedSavePath,
+    );
+  }
+  if (editor.tracks.length + files.length > MAX_TRACKS) {
+    return sessionResult(
+      editor,
+      "A project can have at most two recordings.",
+      blockedSavePath,
+    );
+  }
 
-  const companionPath = sidecarPath(path);
+  const replacing = editor.tracks.length === 0;
+  const first = await readRecording(files[0], desktop);
+  if (replacing) {
+    editor.loadAudio(
+      first.buffer,
+      first.name,
+      first.mono,
+      first.path,
+      first.sha256,
+    );
+  } else {
+    editor.addTrack(
+      first.buffer,
+      first.name,
+      first.mono,
+      first.path,
+      first.sha256,
+    );
+  }
+  for (const path of files.slice(1)) {
+    const extra = await readRecording(path, desktop);
+    editor.addTrack(
+      extra.buffer,
+      extra.name,
+      extra.mono,
+      extra.path,
+      extra.sha256,
+    );
+  }
+
+  if (!replacing || files.length !== 1) {
+    return sessionResult(editor, null, replacing ? null : blockedSavePath);
+  }
+
+  const companionPath = sidecarPath(files[0]);
   try {
     const text = await desktop.readText(companionPath);
     if (text) {
@@ -44,20 +117,14 @@ export async function openRecordings({
       editor.applyProjectV2(project, companionPath);
     }
   } catch (err) {
-    return {
-      tracks: editor.tracks,
-      projectPath: null as string | null,
-      error: `${describeError(err)} The saved project is protected; use Save As for a new project.`,
-      blockedSavePath: companionPath,
-    };
+    return sessionResult(
+      editor,
+      `${describeError(err)} The saved project is protected; use Save As for a new project.`,
+      companionPath,
+    );
   }
 
-  return {
-    tracks: editor.tracks,
-    projectPath: editor.projectPath,
-    error: null as string | null,
-    blockedSavePath: null as string | null,
-  };
+  return sessionResult(editor, null, null);
 }
 
 export async function saveProject({

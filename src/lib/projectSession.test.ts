@@ -169,4 +169,31 @@ describe("openRecordings", () => {
     expect(saved.projectPath).toBe("/rec/new.hre.json");
     expect(desktop.files.has("/rec/new.hre.json")).toBe(true);
   });
+
+  it("adds a second imported recording to the open session instead of replacing it", async () => {
+    const editor = new EditorState();
+    const desktop = memoryDesktop({
+      audio: {
+        "/rec/a.wav": new Uint8Array([0]),
+        "/rec/b.wav": new Uint8Array([1]),
+      },
+      missingText: ["/rec/a.hre.json", "/rec/b.hre.json"],
+    });
+
+    await openRecordings({
+      files: ["/rec/a.wav"],
+      desktop,
+      editor,
+    });
+    const result = await openRecordings({
+      files: ["/rec/b.wav"],
+      desktop,
+      editor,
+    });
+
+    expect(result.error).toBe(null);
+    expect(result.tracks).toHaveLength(2);
+    expect(result.tracks[0].filePath).toBe("/rec/a.wav");
+    expect(result.tracks[1].filePath).toBe("/rec/b.wav");
+  });
 });

@@ -16,6 +16,7 @@
     canSave = false,
     canExport = false,
     canAddRecording = false,
+    canImport = true,
     twoTrack = false,
     onSave,
     onSaveAs,
@@ -37,6 +38,7 @@
     canSave?: boolean;
     canExport?: boolean;
     canAddRecording?: boolean;
+    canImport?: boolean;
     twoTrack?: boolean;
     onSave: () => void;
     onSaveAs: () => void;
@@ -130,7 +132,7 @@
       </button>
       <button type="button" role="menuitem" disabled={!canSave || isSaving} onclick={() => run(onSaveAs)}>Save as</button>
       <button type="button" role="menuitem" disabled={isLoading} onclick={() => run(onOpen)}>Open</button>
-      <button type="button" role="menuitem" disabled={isLoading} onclick={() => run(onImport)}>Import</button>
+      <button type="button" role="menuitem" disabled={isLoading || !canImport} onclick={() => run(onImport)}>Import</button>
       <button type="button" role="menuitem" disabled={isLoading || !canAddRecording} onclick={() => run(onAddRecording)}>Add recording</button>
       <button type="button" role="menuitem" disabled={!canExport || isExporting} onclick={openExport}>
         {isExporting ? "Exporting…" : "Export"}

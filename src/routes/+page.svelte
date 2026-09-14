@@ -11,7 +11,7 @@
     padToFrames,
     renderForExport,
   } from "$lib/audio/exportMix";
-  import { editor, MAX_TRACKS } from "$lib/editor.svelte";
+  import { editor } from "$lib/editor.svelte";
   import {
     joinPath,
     mixFileName,
@@ -159,8 +159,9 @@
   }
 
   /**
-   * Import one or two already-synced recordings as a new session. To add a
-   * second lane to the current project, use Add recording.
+   * Import recordings into this session. An empty session starts from the
+   * chosen files (one file may restore a companion project). A session that
+   * already has a lane attaches another, up to two. File → New starts over.
    */
   async function importRecordings(): Promise<void> {
     loadError = null;
@@ -173,45 +174,19 @@
     }
     if (!selected || selected.length === 0) return;
     const paths = [...new Set(selected)];
-    if (paths.length > MAX_TRACKS) {
-      loadError = `Import at most ${MAX_TRACKS} recordings.`;
-      return;
-    }
 
     isLoading = true;
-    blockedSavePath = null;
     saveError = null;
     try {
       player.pause();
-      if (paths.length === 1) {
-        const result = await openRecordings({
-          files: paths,
-          desktop: tauriDesktop(),
-          editor,
-        });
-        loadError = result.error;
-        blockedSavePath = result.blockedSavePath;
-        return;
-      }
-      const loaded = await Promise.all(
-        paths.map((path) => readAndHashAudio(path)),
-      );
-      const [first, second] = loaded;
-      editor.loadAudio(
-        first.buffer,
-        first.name,
-        first.mono,
-        first.path,
-        first.sha256,
-      );
-      if (second)
-        editor.addTrack(
-          second.buffer,
-          second.name,
-          second.mono,
-          second.path,
-          second.sha256,
-        );
+      const result = await openRecordings({
+        files: paths,
+        desktop: tauriDesktop(),
+        editor,
+        blockedSavePath,
+      });
+      loadError = result.error;
+      blockedSavePath = result.blockedSavePath;
     } catch (err) {
       loadError = describeError(err);
     } finally {
@@ -755,6 +730,7 @@
         canSave={!!editor.filePath}
         canExport={editor.hasAudio}
         canAddRecording={editor.canAddTrack}
+        canImport={!editor.hasAudio || editor.canAddTrack}
         twoTrack={editor.tracks.length > 1}
         onSave={() => saveProject()}
         onSaveAs={saveProjectAs}

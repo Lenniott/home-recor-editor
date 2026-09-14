@@ -102,7 +102,7 @@
   {#if editor.tracks.length === 0}
     <div class="empty">
       <p>Start with your speaker recordings</p>
-      <p class="hint">File → New, then Import one or two synced recordings. Open a saved .hre.json to come back to a project.</p>
+      <p class="hint">File → Import one recording, then Import again for the second synced lane (or pick both at once). Open a saved .hre.json to come back to a project. File → New starts over.</p>
     </div>
   {:else}
     {#if !compact}

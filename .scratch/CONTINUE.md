@@ -39,7 +39,7 @@ Read this file when the user says **continue**, **delivery**, **TDD tickets**, o
 ## Product facts the next slice must keep
 
 - File → **New** clears the session (confirm if dirty).
-- File → **Import** replaces the session (1–2 recordings). One file: a current-format companion beside it restores marks/transcript and becomes the save path; missing companion is a blank session; unreadable companion shows an error and blocks Save to that path (Save As still works).
+- File → **Import** adds to the current session (max two recordings). First import into an empty session may restore a current-format companion; missing companion is a blank session; unreadable companion shows an error and blocks Save to that path (Save As still works). File → **New** starts over.
 - File → **Add recording** attaches lane 2.
 - File → **Open** is current-format `.hre.json`; Locate on missing sources; cancel leaves the current project and shows an error.
 - Zero-width marks in JSON are dropped on parse.
