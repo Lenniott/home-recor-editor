@@ -35,9 +35,11 @@ Transcripts save with the project and reload with it — no re-transcribing afte
 
 ## Projects
 
-**Save**/Cmd+S writes next to the recording the first time (`<name>.hre.json`) and to that same file afterward; **Save As…** picks a different location, independent of where the recording lives. **Open Project…** opens a `.hre.json` directly — if its recording has moved, you're prompted to locate it. Once a project has a save location, edits (including a finished transcript) autosave shortly after you stop making them; the toolbar shows Saving…/Saved/Unsaved changes. Writes are atomic, so an interrupted save never leaves a corrupt project file.
+**New** clears the session (confirms if there are unsaved changes). **Import** always starts a new session from one or two recordings; a sidecar next to a single imported file still restores if present. **Add recording** attaches the second synced lane to the current project. **Save**/Cmd+S writes next to the recording the first time (`<name>.hre.json`) and to that same file afterward; **Save as** picks a different location. **Open** opens a `.hre.json` directly — if a recording has moved, you're prompted to locate it. Cancelling Locate leaves the current project in place and shows an error. Once a project has a save location, edits (including a finished transcript) autosave shortly after you stop making them; the footer shows Saving…/Saved/Unsaved changes. Writes are atomic, so an interrupted save never leaves a corrupt project file.
 
-Each project records its recording's content hash (SHA-256) and duration. Opening a project requires all referenced recordings and matching source identities. Missing sources can be relinked; changed sources are rejected before replacing the current project. Legacy duration mismatches require the original recording. Project files predating this format (version 1, marks/settings only, no transcript) still open and upgrade to the current format on next save.
+Each project records its recording's content hash (SHA-256) and duration. Opening a project requires all referenced recordings and matching source identities. Missing sources can be relinked; changed sources are rejected before replacing the current project. Zero-width silence marks in a saved file are ignored on open rather than rejecting the project. Legacy duration mismatches require the original recording. Project files predating this format (version 1, marks/settings only, no transcript) still restore by importing the recording beside the sidecar and upgrade to the current format on next save.
+
+**Delivery / TDD program:** agents continue from `.scratch/CONTINUE.md` (branch `tdd/program`).
 
 ## Cleanup workflow
 

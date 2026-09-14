@@ -5,9 +5,10 @@ You implement **one** ticket. Stop when that ticket’s acceptance criteria have
 ## Read first (in order)
 
 1. This file.
-2. The ticket markdown you were given.
-3. The matching `## NN` section in that area’s `TDD.md`.
-4. Locked decisions in `DELIVERY.md` if the ticket is a product-lock.
+2. If you were not given a ticket path, stop and follow `.scratch/CONTINUE.md` instead (orchestrator pickup).
+3. The ticket markdown you were given.
+4. The matching `## NN` section in that area’s `TDD.md`.
+5. Locked decisions in `DELIVERY.md` if the ticket is a product-lock.
 
 Do not read other tickets’ TDD sections.
 
@@ -17,7 +18,7 @@ Follow TDD: red before green, one test then minimal code, tests at the **seam** 
 
 ## Branch
 
-`git checkout main && git pull` (or the stacked base the orchestrator named). Create `tdd/<area>/<NN>-<slug>` from `TDD.md` **Branch**. Do not push unless the orchestrator said to.
+`git checkout tdd/program` if you are not already on it. Do not create a per-ticket branch unless the orchestrator named one. Do not push unless asked.
 
 ## Loop
 
@@ -34,6 +35,7 @@ Follow TDD: red before green, one test then minimal code, tests at the **seam** 
 - Every AC has an automated check or an explicit “docs-only” AC already marked in the ticket.
 - No session-module import inside Playwright except tickets that have not yet reached e2e 02 (and those must not add new ones).
 - Unrelated files untouched.
+- Orchestrator (not the worker) rewrites `.scratch/CONTINUE.md` and commits.
 
 ## If blocked
 

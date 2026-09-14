@@ -1,10 +1,10 @@
 # Delivery plan — orchestrator
 
-This file is the runbook for the parent agent. Workers never implement from this file; they get one ticket + `WORKER.md` + that area’s `TDD.md`.
+This file is the runbook for the parent agent. **Pickup and “what’s next” live in `.scratch/CONTINUE.md`.** Workers never implement from this file; they get one ticket + `WORKER.md` + that area’s `TDD.md`.
 
-**Default branch:** `main` (`origin/main`).
-**One ticket = one branch = one PR.**
-**Do not push or open PRs until the user asks.** Plan the branches anyway so workers can name them.
+**Default branch for this program:** `tdd/program` (not yet on `main`).
+**Ticket branches** (`tdd/<area>/<NN>-<slug>`) are the planned split if the user asks for PRs. Until then, land slices on `tdd/program`.
+**Do not push or open PRs until the user asks.**
 
 ## Goal
 
@@ -69,7 +69,7 @@ Workers treat these as given. Do not re-open in the ticket.
 
 Merge a wave before starting work that lists those tickets as blockers. Inside a wave, only one holder per mutex.
 
-### Wave 0 — characterization / delete (parallel)
+### Wave 0 — characterization / delete — **done** (`402c2d4`)
 
 | Ticket | Mutex | Why first |
 |--------|-------|-----------|
@@ -79,7 +79,7 @@ Merge a wave before starting work that lists those tickets as blockers. Inside a
 | whisper 02 | RUST_WHISPER | Invalid WAV; no page |
 | project-session 02 | RUST_IO | Atomic write; no page |
 
-### Wave 1 — new seams (parallel after Wave 0 starts, disjoint mutex)
+### Wave 1 — new seams — **current frontier** (see `.scratch/CONTINUE.md`)
 
 | Ticket | Mutex |
 |--------|-------|
@@ -143,8 +143,9 @@ flowchart TB
 2. Check mutex: if another in-flight branch holds it, wait.
 3. Open worker with: ticket path, `.scratch/WORKER.md`, `.scratch/<area>/TDD.md` section for that NN, locked decisions above.
 4. Worker completion criterion: named first-red test went red then green; all ticket ACs have tests; `npm test` and `npm run check` green; for rust tickets `cargo test --manifest-path src-tauri/Cargo.toml`; no extra files.
-5. Orchestrator: mark ticket done, merge order, next frontier.
-6. **Wave finish (always say this to the user).** After the last ticket in a wave is green, the parent message must end with **Manual test**. Never omit the heading. If nothing in the packaged app changed for a user, write `Manual test: none` and one line why (tests-only, dead-code delete, extract with the same branches). If something is listen/click/save/export visible, list numbered steps in the real Tauri window: starting state, action, what they should hear or see. Cover only what this wave could have broken. Do not dump a full regression script.
+5. Orchestrator: mark ticket done; rewrite `.scratch/CONTINUE.md` Status and Next so the next session can start from “continue delivery” with no extra briefing.
+6. Commit the slice and that CONTINUE update on `tdd/program`. Push only if the user asked.
+7. **Wave finish.** User message ends with **Manual test**. Never omit the heading. If nothing in the packaged app changed, `Manual test: none` plus one line why. If File/Open/Save/play/export chrome changed, numbered steps in the Tauri window. Cover only what this wave could have broken.
 
 ## Wave finish template
 
