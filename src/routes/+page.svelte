@@ -205,6 +205,10 @@
       return;
     }
     if (!path) return;
+    if (editor.tracks.some((track) => track.filePath === path)) {
+      loadError = "That recording is already in this project.";
+      return;
+    }
     isLoading = true;
     try {
       const loaded = await readAndHashAudio(path);

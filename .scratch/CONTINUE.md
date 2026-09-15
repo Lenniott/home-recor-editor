@@ -39,7 +39,7 @@ Wave 2 (`project-session` 03–05, PAGE, base = 01) in `DELIVERY.md`.
 ## Product facts the next slice must keep
 
 - File → **New** clears the session (confirm if dirty).
-- File → **Import** adds to the current session (max two recordings). First import into an empty session may restore a current-format companion; missing companion is a blank session; unreadable companion shows an error and blocks Save to that path (Save As still works). File → **New** starts over.
+- File → **Import** adds to the current session (max two recordings). Importing a recording that is already a lane is refused. First import into an empty session may restore a current-format companion; missing companion is a blank session; unreadable companion shows an error and blocks Save to that path (Save As still works). First Save will not overwrite an existing `.hre.json` beside the recording unless this session is already bound to it. File → **New** starts over.
 - File → **Add recording** attaches lane 2.
 - File → **Open** is current-format `.hre.json`; Locate on missing sources; cancel leaves the current project and shows an error.
 - Zero-width marks in JSON are dropped on parse.

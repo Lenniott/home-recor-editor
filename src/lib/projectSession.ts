@@ -75,6 +75,20 @@ export async function openRecordings({
     );
   }
 
+  const alreadyOpen = new Set(
+    editor.tracks.flatMap((track) => (track.filePath ? [track.filePath] : [])),
+  );
+  for (const path of files) {
+    if (alreadyOpen.has(path)) {
+      return sessionResult(
+        editor,
+        "That recording is already in this project.",
+        blockedSavePath,
+      );
+    }
+    alreadyOpen.add(path);
+  }
+
   const replacing = editor.tracks.length === 0;
   const first = await readRecording(files[0], desktop);
   if (replacing) {
@@ -149,6 +163,21 @@ export async function saveProject({
         "This project could not be restored. Use Save As to preserve the existing file.",
       projectPath: editor.projectPath,
     };
+  }
+  if (!destination && path !== editor.projectPath) {
+    let occupied = false;
+    try {
+      occupied = (await desktop.readText(path)) !== null;
+    } catch {
+      occupied = true;
+    }
+    if (occupied) {
+      return {
+        error:
+          "A project file already exists at this name. Use Save As to keep it.",
+        projectPath: editor.projectPath,
+      };
+    }
   }
   const revision = editor.revision;
   await desktop.writeText(

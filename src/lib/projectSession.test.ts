@@ -196,4 +196,118 @@ describe("openRecordings", () => {
     expect(result.tracks[0].filePath).toBe("/rec/a.wav");
     expect(result.tracks[1].filePath).toBe("/rec/b.wav");
   });
+
+  it("does not attach a recording that is already in the session", async () => {
+    const editor = new EditorState();
+    const desktop = memoryDesktop({
+      audio: { "/rec/a.wav": new Uint8Array([0]) },
+      missingText: ["/rec/a.hre.json"],
+    });
+
+    await openRecordings({
+      files: ["/rec/a.wav"],
+      desktop,
+      editor,
+    });
+    editor.setSelection(1, 2);
+    editor.markSelection();
+    const result = await openRecordings({
+      files: ["/rec/a.wav"],
+      desktop,
+      editor,
+    });
+
+    expect(result.error).toBe("That recording is already in this project.");
+    expect(result.tracks).toHaveLength(1);
+    expect(result.tracks[0].rawMarkers).toEqual([{ start: 1, end: 2 }]);
+  });
+});
+
+describe("saveProject", () => {
+  it("does not overwrite an existing sidecar when the session has no project path", async () => {
+    const editor = new EditorState();
+    const original = '{"keep":true}';
+    const desktop = memoryDesktop({
+      audio: { "/rec/a.wav": new Uint8Array([0]) },
+      text: { "/rec/a.hre.json": original },
+    });
+    editor.loadAudio(
+      buffer(),
+      "a.wav",
+      new Float32Array(160000),
+      "/rec/a.wav",
+      "a".repeat(64),
+    );
+
+    const result = await saveProject({
+      editor,
+      desktop,
+      blockedSavePath: null,
+    });
+
+    expect(result.error).toBe(
+      "A project file already exists at this name. Use Save As to keep it.",
+    );
+    expect(result.projectPath).toBe(null);
+    expect(desktop.files.get("/rec/a.hre.json")).toBe(original);
+  });
+
+  it("still writes when the session is already bound to that project file", async () => {
+    const sha256 =
+      "6e340b9cffb37a989ca544e6bb780a2c78901d3fb33738768511a30617afa01d";
+    const companion: PodcastProject = {
+      version: 2,
+      name: "a",
+      sampleRate: 16000,
+      tracks: [
+        {
+          id: "t1",
+          speaker: "Alex",
+          source: { path: "a.wav", name: "a.wav", sha256, duration: 10 },
+          settings: { ...DEFAULT_SETTINGS },
+          detected: [],
+          manualSilences: [{ start: 1, end: 3 }],
+          restored: [],
+          transcript: { status: "missing", words: [] },
+        },
+      ],
+      cuts: [],
+      dismissed: [],
+      workspace: {
+        activeTrackId: "t1",
+        preview: "edited",
+        tab: "transcript",
+        sidebarWidth: 320,
+        sidebarOpen: true,
+        viewStartSec: 0,
+        viewDurationSec: 10,
+        inSec: 0,
+        outSec: 10,
+        loop: false,
+        viewFilter: "all",
+        muteMarked: true,
+      },
+    };
+    const editor = new EditorState();
+    const desktop = memoryDesktop({
+      audio: { "/rec/a.wav": new Uint8Array([0]) },
+      text: { "/rec/a.hre.json": serializePodcastProject(companion) },
+    });
+    await openRecordings({
+      files: ["/rec/a.wav"],
+      desktop,
+      editor,
+    });
+    editor.setSpeaker(editor.tracks[0], "Sam");
+
+    const result = await saveProject({
+      editor,
+      desktop,
+      blockedSavePath: null,
+    });
+
+    expect(result.error).toBe(null);
+    expect(result.projectPath).toBe("/rec/a.hre.json");
+    expect(desktop.files.get("/rec/a.hre.json")).toContain("Sam");
+  });
 });

@@ -694,6 +694,7 @@ export class EditorState {
     sha256: string | null = null,
   ): TrackState | null {
     if (this.tracks.length >= MAX_TRACKS) return null;
+    if (filePath && this.tracks.some((track) => track.filePath === filePath)) return null;
     const previousDuration = this.durationSec;
     const track = this.createTrack();
     track.load(buffer, fileName, monoSamples, filePath, sha256);

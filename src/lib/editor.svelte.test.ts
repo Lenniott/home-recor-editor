@@ -201,6 +201,15 @@ describe("dirty tracking", () => {
     expect(editor.viewStartSec).toBe(2);
     expect(editor.viewDurationSec).toBe(5); // the zoom the user chose is left alone
   });
+
+  it("refuses a second lane that points at the same recording path", () => {
+    const editor = new EditorState();
+    editor.loadAudio(buffer(), "a.wav", new Float32Array(160000), "/rec/a.wav", "a".repeat(64));
+    expect(
+      editor.addTrack(buffer(), "a.wav", new Float32Array(160000), "/rec/a.wav", "a".repeat(64)),
+    ).toBe(null);
+    expect(editor.tracks).toHaveLength(1);
+  });
 });
 
 describe("two-track state model", () => {
