@@ -20,20 +20,19 @@ Read this file when the user says **continue**, **delivery**, **TDD tickets**, o
 | Item | State |
 |------|--------|
 | Branch | `tdd/program` |
-| Latest | vad-options 01: `sileroThresholds(positive)` is the shared positive→negative rule. Detection and transcription import it; `0.5→0.35`, `0.1→0`, `0.9→0.75`. Magic `0.15` lives only in that helper. Ticket 02 still wires track settings into transcribe. |
+| Latest | playback 02: `new AudioPlayer(session)` is the seam; `player.test.ts` proves a fresh editor’s playhead is independent of the module singleton. `export const player` stays as the app adapter. Shared `AudioContext` is `getContext()` identity, not scheduling (03). |
 | Wave 0 | **done** |
-| Wave 1 | in progress (PAGE free, EDITOR free) |
+| Wave 1 | in progress (PAGE free, EDITOR free, PLAYER free) |
 | Frontier | Wave 1 remainder |
 
 ## Next (Wave 1)
 
 | Ticket | Mutex | Blocked by |
 |--------|-------|------------|
-| playback 02 | PLAYER | playback 01 **done** |
 | waveform 01 | WAVEFORM | none |
 | whisper 01 | RUST_WHISPER | whisper 02 **done** |
 
-Wave 2 (`project-session` 03–05, PAGE, base = 01) in `DELIVERY.md`.
+Wave 2 (`project-session` 03–05, PAGE, base = 01; `playback` 03 after 02) in `DELIVERY.md`.
 
 ## Product facts the next slice must keep
 

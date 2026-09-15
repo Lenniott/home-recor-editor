@@ -4,11 +4,11 @@
 
 **Blocked by:** 01: Remove the unused single-track player
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] Toggle, seek, and decode still share one audio context in the app
-- [ ] Tests can construct playback against a test session
-- [ ] UI still plays, seeks, and refreshes after edits
+- [x] Toggle, seek, and decode still share one audio context in the app
+- [x] Tests can construct playback against a test session
+- [x] UI still plays, seeks, and refreshes after edits
 
 ---
 
