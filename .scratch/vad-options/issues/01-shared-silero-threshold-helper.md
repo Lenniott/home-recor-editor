@@ -4,11 +4,11 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] Both call sites use one helper
-- [ ] Magic 0.15 is gone from the transcription path
-- [ ] Unit cases: 0.5 → 0.35, 0.1 → 0, 0.9 → 0.75
+- [x] Both call sites use one helper
+- [x] Magic 0.15 is gone from the transcription path
+- [x] Unit cases: 0.5 → 0.35, 0.1 → 0, 0.9 → 0.75
 
 ---
 

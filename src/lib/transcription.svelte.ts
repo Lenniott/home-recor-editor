@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { sileroThresholds } from "./audio/sileroThresholds";
 import { vadDetector } from "./vadDetector";
 import { mixToMono } from "./audio/decode";
 import { speechWindows, restoreSpeechTimes, type SpeechWindow, type SpeechSpan } from "./audio/speechTimeline";
@@ -125,9 +126,10 @@ export class Transcription {
       // immediately before the worker's structured-clone copy can exhaust
       // WebKit's process memory on long podcast recordings and reload the UI.
       const analysisSamples = this.analysisSamples ?? mixToMono(audio);
+      const { positive, negative } = sileroThresholds(settings.positiveSpeechThreshold);
       const speech = await vadDetector.detect(analysisSamples, audio.sampleRate, {
-        positiveSpeechThreshold: settings.positiveSpeechThreshold,
-        negativeSpeechThreshold: Math.max(0, settings.positiveSpeechThreshold-.15),
+        positiveSpeechThreshold: positive,
+        negativeSpeechThreshold: negative,
       }, fraction => { if (this.jobId === id) this.percent = fraction*100; }, this.vadAbort.signal);
       if (this.jobId !== id || this.audio !== audio || this.disposed) return;
       this.speech = speech;

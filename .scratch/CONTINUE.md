@@ -20,7 +20,7 @@ Read this file when the user says **continue**, **delivery**, **TDD tickets**, o
 | Item | State |
 |------|--------|
 | Branch | `tdd/program` |
-| Latest | transcript-session 01: `EditorState.applyTranscript(trackId, words, status)` is the only write path from the transcript pane. Writes the job owner, not the active lane; identical words+status do not bump `revision`; panel `onSettled` calls the method; stale results after `loadAudio` still discarded. `setTranscript` delegates. Queue failure policy is ticket 03. |
+| Latest | vad-options 01: `sileroThresholds(positive)` is the shared positive→negative rule. Detection and transcription import it; `0.5→0.35`, `0.1→0`, `0.9→0.75`. Magic `0.15` lives only in that helper. Ticket 02 still wires track settings into transcribe. |
 | Wave 0 | **done** |
 | Wave 1 | in progress (PAGE free, EDITOR free) |
 | Frontier | Wave 1 remainder |
@@ -29,7 +29,6 @@ Read this file when the user says **continue**, **delivery**, **TDD tickets**, o
 
 | Ticket | Mutex | Blocked by |
 |--------|-------|------------|
-| vad-options 01 | EDITOR | transcript-session 01 **done** |
 | playback 02 | PLAYER | playback 01 **done** |
 | waveform 01 | WAVEFORM | none |
 | whisper 01 | RUST_WHISPER | whisper 02 **done** |

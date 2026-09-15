@@ -1,4 +1,5 @@
 import { adjacentMarkedRegion, fitWindow, type NavDirection } from "./audio/markerNav";
+import { sileroThresholds } from "./audio/sileroThresholds";
 import {
   applySilenceBuffer,
   moveMarker,
@@ -64,9 +65,6 @@ const DEFAULT_SETTINGS: SilenceSettings = {
   bufferMs: 150,
   quietThresholdDb: -40,
 };
-
-/** Silero's suggested gap between the positive and negative thresholds. */
-const NEGATIVE_THRESHOLD_MARGIN = 0.15;
 
 /** The schema tolerates one or two tracks — see `parsePodcastProject`. */
 export const MAX_TRACKS = 2;
@@ -1002,12 +1000,13 @@ export class EditorState {
     // Commit only completed results; leave edits made during analysis intact.
     const audio = track.audioBuffer;
     try {
+      const { positive, negative } = sileroThresholds(track.settings.positiveSpeechThreshold);
       const segments = await vadDetector.detect(
         track.monoSamples,
         track.sampleRate,
         {
-          positiveSpeechThreshold: track.settings.positiveSpeechThreshold,
-          negativeSpeechThreshold: Math.max(0, track.settings.positiveSpeechThreshold - NEGATIVE_THRESHOLD_MARGIN),
+          positiveSpeechThreshold: positive,
+          negativeSpeechThreshold: negative,
         },
         (fraction) => {
           track.detectionProgress = fraction;
