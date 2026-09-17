@@ -22,7 +22,7 @@
     type ViewMode,
   } from "$lib/components/baseline/Toolbar.svelte";
   import ViewPanel from "$lib/components/baseline/ViewPanel.svelte";
-  import FileMenu, { type ExportChoice } from "$lib/components/FileMenu.svelte";
+  import FileMenu, { type ExportRequest } from "$lib/components/FileMenu.svelte";
   import Button from "$lib/components/baseline/Button.svelte";
   import SelectionActions from "$lib/components/SelectionActions.svelte";
   import TimelineStack from "$lib/components/TimelineStack.svelte";
@@ -30,6 +30,7 @@
   let paneOpen = $state(false);
   let view: ViewMode = $state("both");
   let menuOpen = $state(false);
+  let openAsTranscript = $state(false);
   let windowWidth = $state(1180);
   $effect(() => {
     if (windowWidth < 900) paneOpen = false;
@@ -39,6 +40,7 @@
       editor.cutScopePreview = editor.markerAction === "cut";
   });
   import CutLane from "$lib/components/CutLane.svelte";
+  import MarksList from "$lib/components/MarksList.svelte";
   import SilenceControls from "$lib/components/SilenceControls.svelte";
   import TranscriptPanel from "$lib/components/TranscriptPanel.svelte";
 
@@ -93,6 +95,10 @@
       editor.cuts.length > 0 ||
       editor.cutSuggestionList.length > 0,
   );
+  const exportMarkCount = $derived.by(() => {
+    editor.revision;
+    return editor.markerList.all().filter((marker) => marker.type === "export").length;
+  });
 
   async function readAudioBytes(path: string): Promise<Uint8Array> {
     const io = testDesktop();
@@ -468,9 +474,6 @@
       }) ?? undefined;
   });
 
-  /** What one two-track Export action writes: one WAV per track, one combined mix, or both. */
-  type ExportMode = "separate" | "merge" | "both";
-
   function trackChannels(buffer: AudioBuffer): Float32Array[] {
     return Array.from({ length: buffer.numberOfChannels }, (_, i) =>
       buffer.getChannelData(i),
@@ -514,8 +517,14 @@
     );
   }
 
-  function startExport(choice: ExportChoice): Promise<void> {
-    return choice === "recording" ? exportRecording() : exportProject(choice);
+  function startExport(request: ExportRequest): Promise<void> {
+    if (!request.includeAudio && !request.includeTranscript) return Promise.resolve();
+    const layout =
+      request.layout === "recording" && request.scope === "clips" ? "merge" : request.layout;
+    if (layout === "recording" && request.includeAudio && !request.includeTranscript) {
+      return exportRecording(request.channels);
+    }
+    return exportProject({ ...request, layout });
   }
 
   function resetExportUi(): void {
@@ -539,7 +548,7 @@
    * project stays editable. This is the single-track project's whole
    * Export; a two-track project goes through `exportProject` instead.
    */
-  async function exportRecording(): Promise<void> {
+  async function exportRecording(channels: "mono" | "stereo" = "stereo"): Promise<void> {
     const track = editor.activeTrack;
     const buffer = track?.audioBuffer;
     if (!track || !buffer || isExporting) return;
@@ -603,13 +612,14 @@
    * this is repeatable and leaves the project exactly as editable as it
    * was.
    */
-  async function exportProject(mode: ExportMode): Promise<void> {
+  async function exportProject(request: ExportRequest): Promise<void> {
     if (isExporting) return;
     const loaded = editor.tracks.flatMap((track) => {
       const buffer = track.audioBuffer;
       return buffer
         ? [
             {
+              id: track.id,
               buffer,
               speaker: track.speaker,
               muted: track.markedIntervals.map((r) => ({ ...r })),
@@ -617,8 +627,16 @@
           ]
         : [];
     });
-    if (loaded.length < 2) return;
+    if (loaded.length === 0) return;
+    if (
+      request.scope !== "clips" &&
+      loaded.length < 2 &&
+      request.includeAudio &&
+      !request.includeTranscript
+    )
+      return;
     const cuts = editor.cuts.map((r) => ({ ...r }));
+    const mode = request.layout === "recording" ? "merge" : request.layout;
 
     exportError = null;
     // Lining two rates up means resampling, which is out of scope — say so
@@ -658,16 +676,37 @@
     try {
       const result = await runExport({
         mode,
+        scope: request.scope,
+        channels: request.channels,
+        includeAudio: request.includeAudio,
+        includeTranscript: request.includeTranscript,
+        applyEdits: request.applyEdits,
+        marks: editor.markerList
+          .all()
+          .filter((marker) => marker.type === "export")
+          .map((marker) => ({
+            start: marker.start,
+            end: marker.end,
+            laneIds: [...marker.laneIds],
+          })),
         tracks: loaded.map((entry) => ({
+          id: entry.id,
           channels: trackChannels(entry.buffer),
           sampleRate: entry.buffer.sampleRate,
           speaker: entry.speaker,
           muted: entry.muted,
           fileName: editor.fileName,
+          words: editor.tracks.find((track) => track.id === entry.id)?.transcriptWords,
         })),
         cuts,
         directory,
         writeWav,
+        writeText: (path, contents) => tauriDesktop().writeText(path, contents),
+        fileExists: async (path) => {
+          const virtual = testDesktop();
+          if (virtual) return Object.prototype.hasOwnProperty.call(virtual.files, path);
+          return invoke<boolean>("path_exists", { path });
+        },
         onProgress: (progress, stage) => {
           void showExportProgress(progress, stage);
         },
@@ -756,6 +795,8 @@
         canAddRecording={editor.canAddTrack}
         canImport={!editor.hasAudio || editor.canAddTrack}
         twoTrack={editor.tracks.length > 1}
+        exportMarkCount={exportMarkCount}
+        bind:openAsTranscript
         onSave={() => saveProject()}
         onSaveAs={saveProjectAs}
         onNew={startNewProject}
@@ -850,83 +891,15 @@
     <div class="pane-content" hidden={tab !== "edits"}>
       <h2>Review shared cuts</h2>
       <p class="pane-hint">
-        Cut markers affect every track. Change a silence to a cut to cover all
-        tracks; undo restores the previous type.
+        Cmd/Ctrl-click adds marks to the selection. Cmd/Ctrl+A with a lane or this
+        list focused selects every mark. Backspace, Delete, or Remove deletes the
+        selection in one undo step. Type change applies to every selected mark.
       </p>
       <CutLane reviewOnly />
-      <h2>Marked cuts · {editor.cuts.length}</h2>
-      {#each editor.cuts as cut (`${cut.start}-${cut.end}`)}
-        <div class="edit-row">
-          <Button size="tool" variant="secondary" onclick={() => player.audition(cut)}
-            >{cut.start.toFixed(1)} – {cut.end.toFixed(1)} s</Button
-          >
-          <Button
-            size="tool"
-            variant="secondary"
-            onclick={() => {
-              const mark = editor.markerList
-                .all()
-                .find(
-                  (item) =>
-                    item.type === "cut" &&
-                    item.start === cut.start &&
-                    item.end === cut.end,
-                );
-              if (mark) editor.setType(mark.id, "silence");
-              player.refreshIfPlaying();
-            }}>Change to silence</Button
-          >
-          <Button
-            size="tool"
-            variant="secondary"
-            onclick={() => {
-              editor.restoreCut(cut);
-              player.refreshIfPlaying();
-            }}>Unmark</Button
-          >
-        </div>
-      {/each}
-      {#each editor.tracks as track (track.id)}
-        <h2>{track.speaker} · {track.rawMarkers.length} silences</h2>
-        {#each track.rawMarkers as range (`${track.id}-${range.start}-${range.end}`)}
-          <div class="edit-row">
-            <Button
-              size="tool"
-              variant="secondary"
-              onclick={() => {
-                editor.setActiveTrack(track.id);
-                player.audition(range);
-              }}>{range.start.toFixed(1)} – {range.end.toFixed(1)} s</Button
-            >
-            <Button
-              size="tool"
-              variant="secondary"
-              onclick={() => {
-                const mark = editor.markerList
-                  .all()
-                  .find(
-                    (item) =>
-                      item.type === "silence" &&
-                      item.start === range.start &&
-                      item.end === range.end &&
-                      item.laneIds.includes(track.id),
-                  );
-                if (mark) editor.setType(mark.id, "cut");
-                player.refreshIfPlaying();
-              }}>Change to cut</Button
-            >
-            <Button
-              size="tool"
-              variant="secondary"
-              onclick={() => {
-                editor.setSelection(range.start, range.end, [track.id]);
-                editor.unmarkSelection();
-                player.refreshIfPlaying();
-              }}>Unmark</Button
-            >
-          </div>
-        {/each}
-      {/each}
+      {#key editor.revision}
+        <h2>Marks · {editor.markerList.all().length}</h2>
+      {/key}
+      <MarksList />
     </div>
   {/snippet}
 
@@ -966,7 +939,13 @@
     collapsible={false}
     onexpand={() => (view = "transcript")}
   >
-    <TranscriptPanel compact={view === "audio"} showSelectionActions={false} />
+    <TranscriptPanel
+      compact={view === "audio"}
+      showSelectionActions={false}
+      onExportTranscript={() => {
+        openAsTranscript = true;
+      }}
+    />
   </ViewPanel>
   <ViewPanel
     title="Audio"
@@ -1044,13 +1023,6 @@
     line-height: 1.6;
     color: var(--cream-dim);
     margin-bottom: 1.5rem;
-  }
-
-  .edit-row {
-    display: flex;
-    justify-content: space-between;
-    gap: 0.5rem;
-    margin-bottom: 0.4rem;
   }
 
   .error {

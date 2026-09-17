@@ -16,3 +16,12 @@ Thu 17 Sep 04:19pm: opened markers/export-session/transcript-search TDD tickets;
 Thu 17 Sep 04:34pm: unified silence and cut into one marker list; two-lane silence is one v3 record
 Thu 17 Sep 04:56pm: markers type-change and drop convert-all; export merge plus stereo default; transcript find bar
 Thu 17 Sep 05:06pm: transcript find matches multi-word phrases case-insensitively
+Thu 17 Sep 05:17pm: select Cmd-click and Cmd-A, list all marks, Remove/Backspace one undo, type-change on multi-select
+Thu 17 Sep 05:36pm: export marks overlap stay two records; Mark uses selected lanes; save/reload; paint silence-cut-export
+Thu 17 Sep 05:39pm: runExport clips from export marks; skip empty; never overwrite; nested mute/cut
+Thu 17 Sep 05:43pm: File Export dialog all/clips merge stereo; clips disabled at zero export marks
+Thu 17 Sep 05:50pm: export dialog writes stem-transcript.txt with audio off; apply-edits drops cut/silence words; clips filter; no txt clobber
+Thu 17 Sep 06:12pm: export marks drag like other marks; clip exports write one paragraph transcript txt each
+Thu 17 Sep 06:18pm: export marks draw the same start/end ticks as silence and cut
+Thu 17 Sep 09:46pm: find next/prev scrolls the transcript pane to the current hit
+Thu 17 Sep 10:35pm: scratch tickets dropped continue idle

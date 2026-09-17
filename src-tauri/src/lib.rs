@@ -69,6 +69,11 @@ fn write_text_file(path: &str, contents: &str) -> Result<(), String> {
 // non-Latin name), so the frontend percent-encodes it — see `writeWav`
 // in `+page.svelte` — and it's decoded back to its real bytes here.
 #[tauri::command]
+fn path_exists(path: String) -> bool {
+    std::path::Path::new(&path).exists()
+}
+
+#[tauri::command]
 fn write_audio_file(request: tauri::ipc::Request<'_>) -> Result<(), String> {
     let encoded = request
         .headers()
@@ -179,7 +184,8 @@ pub fn run() {
             read_audio_file,
             read_text_file,
             write_text_file,
-            write_audio_file
+            write_audio_file,
+            path_exists
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

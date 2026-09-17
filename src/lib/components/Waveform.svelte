@@ -34,10 +34,14 @@
   type DragTarget =
     | { type: "cut"; index: number; edge: "start" | "end" }
     | { type: "silence"; index: number; edge: "start" | "end" }
+    | { type: "export"; id: string; edge: "start" | "end" }
     | { type: "trim"; edge: "start" | "end"; otherSec: number }
-    | { type: "select"; anchorSec: number; startX: number; moved: boolean };
+    | { type: "select"; anchorSec: number; startX: number; moved: boolean; additive: boolean };
 
   let drag: DragTarget | null = null;
+  const exportMarks = $derived.by(() =>
+    editor.projectedExports.filter((marker) => marker.laneIds.includes(track.id)),
+  );
 
   const isActive = $derived(editor.activeTrack?.id === track.id);
 
@@ -102,6 +106,14 @@
   }
 
   function hitTest(x: number): DragTarget | null {
+    let exportHit: { id: string; edge: "start" | "end"; dist: number } | null = null;
+    for (const mark of exportMarks) {
+      for (const edge of ["start", "end"] as const) {
+        const dist = Math.abs(x - sourceTimeToX(mark[edge], edge));
+        if (dist <= HIT_RADIUS && (!exportHit || dist < exportHit.dist)) exportHit = { id: mark.id, edge, dist };
+      }
+    }
+    if (exportHit) return { type: "export", id: exportHit.id, edge: exportHit.edge };
     if (editor.preview === "original") for (let i = 0; i < editor.cuts.length; i++) {
       for (const edge of ["start", "end"] as const)
         if (Math.abs(x - sourceTimeToX(editor.cuts[i][edge], edge)) <= HIT_RADIUS) return {type:"cut",index:i,edge};
@@ -284,6 +296,22 @@
     }
   }
 
+  /** Export marks: same edge ticks as silence/cut. Fill only — they don't hatch or mute. */
+  function drawExports(ctx: CanvasRenderingContext2D): void {
+    for (const mark of exportMarks) {
+      const startX = sourceTimeToX(mark.start, "start");
+      const endX = sourceTimeToX(mark.end, "end");
+      if (endX <= startX) continue;
+      ctx.fillStyle = theme.exportFill;
+      ctx.fillRect(startX, 0, endX - startX, height);
+      ctx.strokeStyle = theme.exportBorder;
+      ctx.lineWidth = 1.5;
+      ctx.strokeRect(startX + 0.75, 0.75, Math.max(0, endX - startX - 1.5), height - 1.5);
+      drawTick(ctx, startX);
+      drawTick(ctx, endX);
+    }
+  }
+
   function drawTick(ctx: CanvasRenderingContext2D, x: number): void {
     ctx.strokeStyle = theme.cream;
     ctx.lineWidth = 2;
@@ -425,6 +453,7 @@
     drawGutters(ctx);
     drawCuts(ctx);
     drawMarkers(ctx);
+    drawExports(ctx);
     drawPendingSelection(ctx);
     drawPlayhead(ctx);
   }
@@ -456,6 +485,7 @@
     editor.preview;
     editor.timelineSpans;
     editor.cuts;
+    editor.projectedExports;
     editor.playheadSec;
     editor.cuts;
     editor.selectionRanges;
@@ -466,6 +496,11 @@
 
     draw();
   });
+
+  function selectClickedMark(id: string, additive: boolean): void {
+    if (additive) editor.toggleMarkSelection(id);
+    else editor.selectMarks([id]);
+  }
 
   function onPointerDown(e: PointerEvent): void {
     if (!track.hasAudio) return;
@@ -483,6 +518,7 @@
           anchorSec: resolveClickSourceSec(e.offsetX),
           startX: e.offsetX,
           moved: false,
+          additive: e.metaKey || e.ctrlKey,
         };
     } else {
       drag =
@@ -492,6 +528,7 @@
           anchorSec: resolveClickSourceSec(e.offsetX),
           startX: e.offsetX,
           moved: false,
+          additive: e.metaKey || e.ctrlKey,
         };
     }
     canvas?.setPointerCapture(e.pointerId);
@@ -501,6 +538,8 @@
     if (!drag || !track.hasAudio) return;
     if (drag.type === "cut") {
       editor.moveCut(drag.index, drag.edge, xToSourceTime(e.offsetX));
+    } else if (drag.type === "export") {
+      editor.moveExport(drag.id, drag.edge, xToSourceTime(e.offsetX));
     } else if (drag.type === "silence") {
       editor.moveMarker(track, drag.index, drag.edge, resolveSilenceDragSourceSec(drag.index, e.offsetX));
     } else if (drag.type === "trim") {
@@ -531,15 +570,41 @@
         // leaving a zero-width one behind.
         player.seek(drag.anchorSec);
         const at = drag.anchorSec;
+        const exported = editor.markerList.all().find(
+          (item) =>
+            item.type === "export" &&
+            item.laneIds.includes(track.id) &&
+            item.start <= at &&
+            item.end > at,
+        );
         const cut = editor.cuts.find(r => r.start <= at && r.end > at);
         const silence = track.rawMarkers.find(r => r.start <= at && r.end > at);
-        if (cut) {
+        if (exported) {
+          editor.markerAction = "export";
+          editor.setSelection(exported.start, exported.end, [...exported.laneIds]);
+          selectClickedMark(exported.id, drag.additive);
+        } else if (cut) {
           editor.markerAction = "cut";
           editor.setSelection(cut.start,cut.end,editor.tracks.map(t => t.id));
+          const mark = editor.markerList.all().find(
+            (item) => item.type === "cut" && item.start === cut.start && item.end === cut.end,
+          );
+          if (mark) selectClickedMark(mark.id, drag.additive);
         } else if (silence) {
           editor.markerAction = "silence";
           editor.setSelection(silence.start,silence.end,[track.id]);
-        } else if (!tweak) editor.clearSelection();
+          const mark = editor.markerList.all().find(
+            (item) =>
+              item.type === "silence" &&
+              item.start === silence.start &&
+              item.end === silence.end &&
+              item.laneIds.includes(track.id),
+          );
+          if (mark) selectClickedMark(mark.id, drag.additive);
+        } else if (!tweak) {
+          editor.clearSelection();
+          if (!drag.additive) editor.selectMarks([]);
+        }
       } else {
         // A real drag: auto-merge into an existing marked region if the
         // overlap is substantial, otherwise leave it pending for Mark/Unmark/Cut.
@@ -551,6 +616,8 @@
     } else if (drag.type === "cut") {
       editor.finishCutDrag();
       player.refreshIfPlaying();
+    } else if (drag.type === "export") {
+      // Export marks do not merge on overlap; the resize already landed.
     } else if (drag.type === "silence") {
       // Merge check happens only here, once, rather than on every
       // pointermove — see finishMarkerDrag for why.
@@ -587,6 +654,15 @@
         ></div>
       {/if}
     {/each}
+    {#each exportMarks as mark (mark.id)}
+      {@const left = sourceTimeToX(mark.start, "start")}
+      {@const right = sourceTimeToX(mark.end, "end")}
+      <div
+        class="mark export"
+        data-export-mark={mark.id}
+        style="left:{left}px;width:{Math.max(2, right - left)}px"
+      ></div>
+    {/each}
   {:else}
     <div class="empty">
       <p>No recording loaded</p>
@@ -616,6 +692,11 @@
     top: 0;
     bottom: 0;
     pointer-events: none;
+    z-index: 1;
+  }
+
+  .mark.export {
+    z-index: 3;
   }
 
   canvas {

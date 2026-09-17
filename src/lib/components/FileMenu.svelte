@@ -1,8 +1,17 @@
 <script module lang="ts">
   export type ExportChoice = "recording" | "separate" | "merge" | "both";
+  export type ExportRequest = {
+    scope: "all" | "clips";
+    layout: ExportChoice;
+    channels: "mono" | "stereo";
+    includeAudio: boolean;
+    includeTranscript: boolean;
+    applyEdits: boolean;
+  };
 </script>
 
 <script lang="ts">
+  import { untrack } from "svelte";
   import Button from "./baseline/Button.svelte";
   import Model from "./baseline/Model.svelte";
 
@@ -18,6 +27,7 @@
     canAddRecording = false,
     canImport = true,
     twoTrack = false,
+    exportMarkCount = 0,
     onSave,
     onSaveAs,
     onOpen,
@@ -27,6 +37,7 @@
     onExport,
     onExportReset,
     open = $bindable(false),
+    openAsTranscript = $bindable(false),
     showTrigger = true,
   }: {
     isLoading?: boolean;
@@ -40,20 +51,29 @@
     canAddRecording?: boolean;
     canImport?: boolean;
     twoTrack?: boolean;
+    exportMarkCount?: number;
     onSave: () => void;
     onSaveAs: () => void;
     onOpen: () => void;
     onNew: () => void;
     onImport: () => void;
     onAddRecording: () => void;
-    onExport: (choice: ExportChoice) => Promise<void>;
+    onExport: (request: ExportRequest) => Promise<void>;
     onExportReset: () => void;
     open?: boolean;
+    openAsTranscript?: boolean;
     showTrigger?: boolean;
   } = $props();
   let exportOpen = $state(false);
   let root: HTMLElement | undefined = $state();
   let awaitingDestination = $state(false);
+  let exportScope: ExportRequest["scope"] = $state("all");
+  let exportChannels: ExportRequest["channels"] = $state("stereo");
+  let includeAudio = $state(true);
+  let includeTranscript = $state(false);
+  let applyEdits = $state(true);
+  const clipsDisabled = $derived(exportMarkCount < 1);
+  const canWrite = $derived(includeAudio || includeTranscript);
 
   const showExportProgress = $derived(isExporting || !!exportStage);
 
@@ -66,18 +86,36 @@
     action();
   }
 
-  function openExport(): void {
+  function openExport(transcriptOnly = false): void {
     closeMenu();
     if (!canExport || isExporting) return;
     onExportReset();
     awaitingDestination = false;
+    if (clipsDisabled) exportScope = "all";
+    includeAudio = !transcriptOnly;
+    includeTranscript = transcriptOnly;
+    applyEdits = true;
     exportOpen = true;
   }
 
-  async function chooseExport(choice: ExportChoice): Promise<void> {
+  $effect(() => {
+    if (!openAsTranscript) return;
+    openAsTranscript = false;
+    untrack(() => openExport(true));
+  });
+
+  async function chooseExport(layout: ExportChoice): Promise<void> {
+    if (!canWrite) return;
     awaitingDestination = true;
     try {
-      await onExport(choice);
+      await onExport({
+        scope: exportScope,
+        layout,
+        channels: exportChannels,
+        includeAudio,
+        includeTranscript,
+        applyEdits,
+      });
     } finally {
       awaitingDestination = false;
     }
@@ -134,8 +172,11 @@
       <button type="button" role="menuitem" disabled={isLoading} onclick={() => run(onOpen)}>Open</button>
       <button type="button" role="menuitem" disabled={isLoading || !canImport} onclick={() => run(onImport)}>Import</button>
       <button type="button" role="menuitem" disabled={isLoading || !canAddRecording} onclick={() => run(onAddRecording)}>Add recording</button>
-      <button type="button" role="menuitem" disabled={!canExport || isExporting} onclick={openExport}>
+      <button type="button" role="menuitem" disabled={!canExport || isExporting} onclick={() => openExport()}>
         {isExporting ? "Exporting…" : "Export"}
+      </button>
+      <button type="button" role="menuitem" disabled={!canExport || isExporting} onclick={() => openExport(true)}>
+        Export transcript…
       </button>
     </div>
   {/if}
@@ -150,7 +191,29 @@
 >
   <div class="export-sheet">
     <h2 id="export-title">Export</h2>
-    <p>Apply all silence and cut markers to new WAV files. The project stays editable.</p>
+    <p>Write new WAV and/or a transcript text file. Silence and cut markers apply to audio always; transcript apply-edits drops cut and silenced words. Export marks are ignored in preview. The project stays editable.</p>
+    <fieldset class="export-flags">
+      <legend>Include</legend>
+      <label><input type="checkbox" name="export-include-audio" bind:checked={includeAudio} /> Audio</label>
+      <label><input type="checkbox" name="export-include-transcript" bind:checked={includeTranscript} /> Transcript</label>
+    </fieldset>
+    <fieldset class="export-flags">
+      <legend>Transcript</legend>
+      <label><input type="checkbox" name="export-apply-edits" bind:checked={applyEdits} /> Apply edits</label>
+    </fieldset>
+    <fieldset class="export-flags">
+      <legend>Scope</legend>
+      <label><input type="radio" name="export-scope" value="all" bind:group={exportScope} /> All</label>
+      <label>
+        <input type="radio" name="export-scope" value="clips" bind:group={exportScope} disabled={clipsDisabled} />
+        Clips
+      </label>
+    </fieldset>
+    <fieldset class="export-flags">
+      <legend>Channels</legend>
+      <label><input type="radio" name="export-channels" value="stereo" bind:group={exportChannels} /> Stereo</label>
+      <label><input type="radio" name="export-channels" value="mono" bind:group={exportChannels} /> Mono</label>
+    </fieldset>
     {#if showExportProgress}
       <div
         class="export-progress"
@@ -166,11 +229,11 @@
     {:else if awaitingDestination}
       <p class="wait">Choose a save location…</p>
     {:else if twoTrack}
-      <Button variant="primary" onclick={() => chooseExport("separate")}>Separate tracks</Button>
-      <Button variant="primary" onclick={() => chooseExport("merge")}>Combined merge</Button>
-      <Button variant="primary" onclick={() => chooseExport("both")}>Both</Button>
+      <Button variant="primary" disabled={!canWrite} onclick={() => chooseExport("separate")}>Separate tracks</Button>
+      <Button variant="primary" disabled={!canWrite} onclick={() => chooseExport("merge")}>Combined merge</Button>
+      <Button variant="primary" disabled={!canWrite} onclick={() => chooseExport("both")}>Both</Button>
     {:else}
-      <Button variant="primary" onclick={() => chooseExport("recording")}>Export edited recording</Button>
+      <Button variant="primary" disabled={!canWrite} onclick={() => chooseExport("recording")}>Export edited recording</Button>
     {/if}
     {#if exportError && !isExporting}
       <p class="fail">Export failed: {exportError}</p>
@@ -255,5 +318,21 @@
   }
   .export-sheet :global(.cancel) {
     margin-top: 0.25rem;
+  }
+  .export-flags {
+    border: 0;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.65rem;
+    font-size: 0.75rem;
+  }
+  .export-flags legend {
+    padding: 0;
+    margin-bottom: 0.25rem;
+    width: 100%;
+    font-size: 0.7rem;
+    color: var(--cream-dim);
   }
 </style>

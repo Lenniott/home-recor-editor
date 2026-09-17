@@ -16,7 +16,12 @@
   let {
     showSelectionActions = true,
     compact = false,
-  }: { showSelectionActions?: boolean; compact?: boolean } = $props();
+    onExportTranscript,
+  }: {
+    showSelectionActions?: boolean;
+    compact?: boolean;
+    onExportTranscript?: () => void;
+  } = $props();
   let findQuery = $state("");
   let findFieldEl: HTMLInputElement | undefined = $state();
   const findEnabled = $derived(
@@ -255,6 +260,12 @@
       if (!editor.isPlaying || dragging || editor.hasSelection) return;
       keepWordInView(index);
     });
+  });
+
+  $effect(() => {
+    const index = findCurrentIndex;
+    if (compact || index < 0) return;
+    untrack(() => keepWordInView(index));
   });
 
   function select(
@@ -551,6 +562,14 @@
         onclick={() => stepFind(-1)}
         disabled={!findEnabled || !findHitList.length}>Previous match</Button
       >
+      {#if onExportTranscript}
+        <Button
+          size="tool"
+          variant="secondary"
+          onclick={onExportTranscript}
+          disabled={!findEnabled}>Export transcript…</Button
+        >
+      {/if}
     {/if}
     {#if showSelectionActions && words.length && editor.hasSelection}
       <Button variant="secondary" onclick={mark}

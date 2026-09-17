@@ -19,7 +19,12 @@
         "quietThresholdDb": -40
       },
       "detected": [],
-      "manualSilences": [],
+      "manualSilences": [
+        {
+          "start": 11.56,
+          "end": 13.1773125
+        }
+      ],
       "restored": [],
       "transcript": {
         "status": "complete",
@@ -133,16 +138,7 @@
         "quietThresholdDb": -40
       },
       "detected": [],
-      "manualSilences": [
-        {
-          "start": 0.4966350655430712,
-          "end": 1.507315074906367
-        },
-        {
-          "start": 1.639618476323829,
-          "end": 2.5248170506619148
-        }
-      ],
+      "manualSilences": [],
       "restored": [],
       "transcript": {
         "status": "complete",
@@ -173,37 +169,28 @@
   ],
   "cuts": [
     {
-      "start": 8.84644595265827,
-      "end": 10.452441388051529
+      "start": 11.88003451556732,
+      "end": 12.91249984585826
     }
   ],
   "dismissed": [],
   "markers": [
     {
-      "id": "m1",
+      "id": "m19",
       "type": "silence",
-      "start": 0.4966350655430712,
-      "end": 1.507315074906367,
+      "start": 11.56,
+      "end": 13.1773125,
       "laneIds": [
-        "track-2"
+        "track-1"
       ]
     },
     {
-      "id": "m2",
+      "id": "m24",
       "type": "cut",
-      "start": 8.84644595265827,
-      "end": 10.452441388051529,
+      "start": 11.88003451556732,
+      "end": 12.91249984585826,
       "laneIds": [
         "track-1",
-        "track-2"
-      ]
-    },
-    {
-      "id": "m4",
-      "type": "silence",
-      "start": 1.639618476323829,
-      "end": 2.5248170506619148,
-      "laneIds": [
         "track-2"
       ]
     }
@@ -214,8 +201,8 @@
     "tab": "transcript",
     "sidebarWidth": 320,
     "sidebarOpen": true,
-    "viewStartSec": 4.24045051726501,
-    "viewDurationSec": 8.936861982734989,
+    "viewStartSec": 0,
+    "viewDurationSec": 9.582,
     "inSec": 7.84644595265827,
     "outSec": 11.452441388051529,
     "loop": true,

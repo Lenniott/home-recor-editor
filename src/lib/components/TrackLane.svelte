@@ -51,7 +51,20 @@
   }
 </script>
 
-<div class="lane" class:compact data-track-lane={track.id} class:active={isActive}>
+<div
+  class="lane"
+  class:compact
+  data-track-lane={track.id}
+  class:active={isActive}
+  tabindex="0"
+  role="listbox"
+  aria-label="{track.speaker} lane"
+  aria-multiselectable="true"
+  onpointerdown={(event) => {
+    if ((event.target as HTMLElement).closest("input,button")) return;
+    (event.currentTarget as HTMLElement).focus();
+  }}
+>
   <div class="lane-label">
     {#if compact}
       <span class="speaker-name">{track.speaker}</span>

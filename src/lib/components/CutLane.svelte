@@ -44,10 +44,16 @@
     editor.endEdit();
     player.refreshIfPlaying();
   }
-  function selectCut(range: Range): void {
+  function selectCut(event: MouseEvent, range: Range): void {
     editor.markerAction = "cut";
-    editor.setSelection(range.start,range.end,editor.tracks.map(t => t.id));
+    editor.setSelection(range.start, range.end, editor.tracks.map((t) => t.id));
     editor.cutScopePreview = true;
+    const mark = editor.markerList
+      .all()
+      .find((item) => item.type === "cut" && item.start === range.start && item.end === range.end);
+    if (!mark) return;
+    if (event.metaKey || event.ctrlKey) editor.toggleMarkSelection(mark.id);
+    else editor.selectMarks([mark.id]);
   }
 
   const suggestions = $derived(editor.cutSuggestionList);
@@ -121,7 +127,7 @@
           data-cut-index={cutIndex}
           style="left:{box.left}px;width:{box.width}px"
           title="Cut {formatTime(cut.start)}–{formatTime(cut.end)} — select to edit, drag either edge"
-          onclick={() => selectCut(cut)}
+          onclick={(event) => selectCut(event, cut)}
           aria-label="Select cut at {formatTime(cut.start)}"
         ></button>
       {/if}
@@ -232,6 +238,7 @@
   }
 
   .mark.cut {
+    z-index: 2;
     background: rgba(209, 73, 91, 0.35);
     border-color: var(--in-color);
   }

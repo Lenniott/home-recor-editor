@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { joinPath, mergeFileName, projectStem, sanitizeFileNamePart, separateTrackFileNames } from "./exportNames";
+import { clipTranscriptFileName, joinPath, mergeFileName, projectStem, sanitizeFileNamePart, separateTrackFileNames } from "./exportNames";
 
 describe("sanitizeFileNamePart", () => {
   it("replaces path separators and reserved punctuation", () => {
@@ -69,6 +69,12 @@ describe("separateTrackFileNames", () => {
 describe("mergeFileName", () => {
   it("names the combined merge after the project", () => {
     expect(mergeFileName("interview")).toBe("interview-merge.wav");
+  });
+});
+
+describe("clipTranscriptFileName", () => {
+  it("pairs a clip wav with a clip txt", () => {
+    expect(clipTranscriptFileName("interview", 2)).toBe("interview-clip-2.txt");
   });
 });
 

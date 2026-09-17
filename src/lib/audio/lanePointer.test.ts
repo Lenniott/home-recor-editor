@@ -70,4 +70,10 @@ describe("trackIdsForPointerY", () => {
     expect(src).toContain("trackIdsForPointerY");
     expect(src).not.toMatch(/querySelectorAll/);
   });
+
+  it("Waveform draws export mark edges with the same ticks as silence and cut", () => {
+    const src = readFileSync(new URL("../components/Waveform.svelte", import.meta.url), "utf8");
+    expect(src).toMatch(/function drawExports[\s\S]*drawTick\(ctx, startX\)[\s\S]*drawTick\(ctx, endX\)/);
+    expect(src).toContain("drawExports(ctx)");
+  });
 });

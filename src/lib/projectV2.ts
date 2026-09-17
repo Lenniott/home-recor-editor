@@ -116,7 +116,7 @@ function parseMarkers(value: unknown, trackIds: string[], duration: number): Tim
   const allowed = new Set(trackIds);
   const markers: TimelineMarker[] = [];
   for (const marker of value) {
-    if (!marker || typeof marker.id !== 'string' || !marker.id || (marker.type !== 'silence' && marker.type !== 'cut') || !finite(marker.start) || !finite(marker.end)) {
+    if (!marker || typeof marker.id !== 'string' || !marker.id || (marker.type !== 'silence' && marker.type !== 'cut' && marker.type !== 'export') || !finite(marker.start) || !finite(marker.end)) {
       throw new Error('Invalid project markers');
     }
     if (!Array.isArray(marker.laneIds) || marker.laneIds.some((id: unknown) => typeof id !== 'string' || !allowed.has(id))) {

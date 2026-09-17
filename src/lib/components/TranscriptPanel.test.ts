@@ -476,6 +476,20 @@ describe("transcript find", () => {
     expect(hits().map((hit) => hit.getAttribute("aria-current"))).toEqual([null, "true"]);
   });
 
+  it("next match scrolls the transcript pane to the current hit", () => {
+    typeFind("hello");
+    const pane = target.querySelector<HTMLElement>(".words")!;
+    const nextHit = target.querySelectorAll<HTMLElement>("[data-find-hit]")[1]!;
+    pane.getBoundingClientRect = () =>
+      ({ top: 0, bottom: 80, height: 80, left: 0, right: 300, width: 300, x: 0, y: 0, toJSON() {} }) as DOMRect;
+    Object.defineProperty(pane, "clientHeight", { configurable: true, value: 80 });
+    nextHit.getBoundingClientRect = () =>
+      ({ top: 400, bottom: 420, height: 20, left: 0, right: 40, width: 40, x: 0, y: 400, toJSON() {} }) as DOMRect;
+    button("Next match").click();
+    flushSync();
+    expect(pane.scrollTop).toBe(360);
+  });
+
   it("clears highlights when the query is empty", () => {
     typeFind("hello");
     expect(target.querySelectorAll("[data-find-hit]")).toHaveLength(2);
@@ -509,5 +523,27 @@ describe("transcript find", () => {
     expect([editor.selectionStartSec, editor.selectionEndSec]).toEqual([4, 4.4]);
     expect(editor.playheadSec).toBe(4);
     expect(player.seek).toHaveBeenCalledWith(4);
+  });
+});
+
+describe("export transcript control", () => {
+  it("calls onExportTranscript from the pane control", async () => {
+    await unmount(component);
+    const called: number[] = [];
+    component = mount(TranscriptPanel, {
+      target,
+      props: { onExportTranscript: () => called.push(1) },
+    });
+    flushSync();
+    editor.setTranscript(
+      [
+        { text: "Hello", start: 1, end: 1.5 },
+        { text: "there", start: 1.6, end: 2.2 },
+      ],
+      "complete",
+    );
+    flushSync();
+    button("Export transcript").click();
+    expect(called).toEqual([1]);
   });
 });

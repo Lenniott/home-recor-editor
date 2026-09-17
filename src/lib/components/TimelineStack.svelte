@@ -43,9 +43,11 @@
   let laneWidth = 1;
 
   function attachWheel(node: HTMLElement) {
-    const stop = on(node, "wheel", onWheel, { passive: false });
+    const stopWheel = on(node, "wheel", onWheel, { passive: false });
+    const stopKeys = on(node, "keydown", onSelectAllMarks);
     return () => {
-      stop();
+      stopWheel();
+      stopKeys();
       if (rafId !== null) {
         cancelAnimationFrame(rafId);
         rafId = null;
@@ -111,9 +113,21 @@
     }
     scheduleWheelFlush();
   }
+
+  function onSelectAllMarks(event: KeyboardEvent): void {
+    if (!(event.metaKey || event.ctrlKey) && ["Backspace", "Delete"].includes(event.key)) {
+      if (editor.selectedMarkIds.length === 0) return;
+      event.preventDefault();
+      editor.removeSelectedMarks();
+      return;
+    }
+    if (!(event.metaKey || event.ctrlKey) || event.key.toLowerCase() !== "a") return;
+    event.preventDefault();
+    editor.selectAllMarks();
+  }
 </script>
 
-<section class="stage" class:compact {@attach attachWheel}>
+<div class="stage" class:compact {@attach attachWheel} role="application" aria-label="Timeline">
   {#if !compact}
     <TimelineRuler />
   {/if}
@@ -130,7 +144,7 @@
       {#each editor.tracks as track (track.id)}<TrackLane {track} {compact} />{/each}
     </div>
   {/if}
-</section>
+</div>
 
 <style>
   .stage {

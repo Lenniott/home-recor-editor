@@ -357,8 +357,11 @@ export class EditorState {
   selectionTrackIds: string[] = $state([]);
   selectionRanges: { trackId: string; start: number; end: number }[] = $state([]);
   cutScopePreview = $state(false);
-  markerAction: "silence" | "cut" = $state("silence");
+  markerAction: "silence" | "cut" | "export" = $state("silence");
   markerList = new MarkerList();
+  /** Reactive snapshot of export marks so the waveform can paint ticks without reading the list internals. */
+  projectedExports: TimelineMarker[] = $state([]);
+  selectedMarkIds: string[] = $state([]);
   readonly selectionTracks = $derived(this.tracks.filter(t => this.selectionTrackIds.includes(t.id)));
   readonly selectionLabel = $derived(this.selectionTracks.map(t => t.speaker).join(" + "));
   readonly detectingAny = $derived(this.tracks.some(t => t.isDetectingSilence));
@@ -570,6 +573,9 @@ export class EditorState {
   private projectMarks(): void {
     for (const track of this.tracks) track.rawMarkers = this.markerList.silencesOn(track.id);
     this.cuts = normalize(this.markerList.cuts(), this.durationSec);
+    this.projectedExports = this.markerList.all().filter((marker) => marker.type === "export");
+    const live = new Set(this.markerList.all().map((marker) => marker.id));
+    this.selectedMarkIds = this.selectedMarkIds.filter((id) => live.has(id));
   }
 
   private resetMarkerList(): void {
@@ -799,6 +805,7 @@ export class EditorState {
   private resetSessionState(durationSec: number): void {
     this.markerAction = "silence";
     this.clearSelection();
+    this.selectedMarkIds = [];
     this.playheadSec = 0;
     this.isPlaying = false;
     this.inSec = 0;
@@ -1208,7 +1215,7 @@ export class EditorState {
         if (group) group.laneIds.push(target.id);
         else groups.set(key, { start: span.start, end: span.end, laneIds: [target.id] });
       }
-      for (const group of groups.values()) this.markerList.add("silence", group.start, group.end, group.laneIds);
+      for (const group of groups.values()) this.markerList.add(this.markerAction === "export" ? "export" : "silence", group.start, group.end, group.laneIds);
       this.projectMarks();
       this.clearSelection();
     });
@@ -1224,7 +1231,7 @@ export class EditorState {
       if (!range) return;
       for (const target of track ? [track] : this.selectionTracks) {
         const span = track ? range : this.selectionFor(target);
-        if (span) this.markerList.subtract("silence", span.start, span.end, [target.id]);
+        if (span) this.markerList.subtract(this.markerAction === "export" ? "export" : "silence", span.start, span.end, [target.id]);
       }
       this.projectMarks();
       this.clearSelection();
@@ -1235,27 +1242,64 @@ export class EditorState {
     if (this.markerAction === "silence") return this.selectionOverlap;
     const range = this.selectionRange;
     if (!range) return null;
+    if (this.markerAction === "export") {
+      const regions = this.selectionTracks.flatMap((track) => this.markerList.exportsOn(track.id));
+      const fraction = overlapFraction(regions, range.start, range.end);
+      return fraction <= 0 ? "unmarked" : fraction >= 1 ? "marked" : "mixed";
+    }
     const fraction = overlapFraction(this.cuts, range.start, range.end);
     return fraction <= 0 ? "unmarked" : fraction >= 1 ? "marked" : "mixed";
   });
 
   markAction(): void {
-    if (this.markerAction === "silence") this.markSelection();
-    else this.cutSelection();
+    if (this.markerAction === "cut") this.cutSelection();
+    else this.markSelection();
   }
 
   unmarkAction(): void {
-    if (this.markerAction === "silence") this.unmarkSelection();
-    else {
+    if (this.markerAction === "cut") {
       const range = this.selectionRange;
       if (!range) return;
       this.commitEdit(() => { this.restoreCut(range); this.clearSelection(); });
+      return;
     }
+    this.unmarkSelection();
   }
 
   setType(id: string, type: MarkerType): void {
     this.commitEdit(() => {
       this.markerList.setType(id, type);
+      this.projectMarks();
+    });
+  }
+
+  setSelectedType(type: MarkerType): void {
+    if (this.selectedMarkIds.length === 0) return;
+    this.commitEdit(() => {
+      for (const id of this.selectedMarkIds) this.markerList.setType(id, type);
+      this.projectMarks();
+    });
+  }
+
+  selectMarks(ids: string[]): void {
+    this.selectedMarkIds = [...ids];
+  }
+
+  toggleMarkSelection(id: string): void {
+    this.selectedMarkIds = this.selectedMarkIds.includes(id)
+      ? this.selectedMarkIds.filter((item) => item !== id)
+      : [...this.selectedMarkIds, id];
+  }
+
+  selectAllMarks(): void {
+    this.selectedMarkIds = this.markerList.all().map((marker) => marker.id);
+  }
+
+  removeSelectedMarks(): void {
+    if (this.selectedMarkIds.length === 0) return;
+    this.commitEdit(() => {
+      this.markerList.remove(this.selectedMarkIds);
+      this.selectedMarkIds = [];
       this.projectMarks();
     });
   }
@@ -1268,6 +1312,15 @@ export class EditorState {
 
   moveCut(index: number, edge: "start" | "end", sec: number): void {
     const mark = this.markerList.all().filter((marker) => marker.type === "cut").sort((a, b) => a.start - b.start)[index];
+    if (!mark) return;
+    const value = clamp(sec, edge === "end" ? mark.start + .001 : 0, edge === "start" ? mark.end - .001 : this.durationSec);
+    this.markerList.resize(mark.id, edge, value);
+    this.projectMarks();
+  }
+
+  /** Resize an export mark. Overlaps stay two records — export does not merge. */
+  moveExport(id: string, edge: "start" | "end", sec: number): void {
+    const mark = this.markerList.all().find((item) => item.id === id && item.type === "export");
     if (!mark) return;
     const value = clamp(sec, edge === "end" ? mark.start + .001 : 0, edge === "start" ? mark.end - .001 : this.durationSec);
     this.markerList.resize(mark.id, edge, value);

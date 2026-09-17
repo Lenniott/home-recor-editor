@@ -4,6 +4,7 @@
   import IconClose from "../icons/IconClose.svelte";
   import IconEye from "../icons/IconEye.svelte";
   import IconLayout from "../icons/IconLayout.svelte";
+  import IconList from "../icons/IconList.svelte";
   import IconMarker from "../icons/IconMarker.svelte";
   import IconMenu from "../icons/IconMenu.svelte";
   import IconPause from "../icons/IconPause.svelte";
@@ -15,7 +16,7 @@
   import IconZoom from "../icons/IconZoom.svelte";
   import IconSettings from "../icons/IconSettings.svelte";
 
-  export type MarkerType = "silence" | "cut";
+  export type MarkerType = "silence" | "cut" | "export";
   export type ViewMode = "both" | "transcript" | "audio";
 
   let {
@@ -224,6 +225,19 @@
       onclick={() => (markerType = "cut")}
     >
       {#snippet glyph()}<IconScissors />{/snippet}
+    </Button>
+    <Button
+      size="tool"
+      variant="secondary"
+      icon="left"
+      label={false}
+      tooltip
+      title="Export"
+      aria-label="Export"
+      aria-pressed={markerType === "export"}
+      onclick={() => (markerType = "export")}
+    >
+      {#snippet glyph()}<IconList />{/snippet}
     </Button>
     {#if hasSelection}
       <Button

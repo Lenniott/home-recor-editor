@@ -80,4 +80,22 @@ describe("compact audio strip", () => {
     expect(target.querySelectorAll('[aria-label="Waveform vertical zoom"]')).toHaveLength(2);
     expect(target.querySelector("canvas.tweak")).toBeNull();
   });
+
+  it("Cmd/Ctrl+A with a lane focused selects every mark", () => {
+    editor.setBufferMs(0, editor.tracks[0]);
+    editor.setSelection(1, 2);
+    editor.markSelection(editor.tracks[0]);
+    editor.setSelection(3, 4);
+    editor.markSelection(editor.tracks[0]);
+    const ids = editor.markerList.all().map((marker) => marker.id);
+    component = mount(TimelineStack, { target, props: { compact: false } });
+    flushSync();
+    const lane = target.querySelector<HTMLElement>("[data-track-lane]");
+    lane?.focus();
+    lane?.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "a", metaKey: true, bubbles: true }),
+    );
+    flushSync();
+    expect(editor.selectedMarkIds).toEqual(ids);
+  });
 });

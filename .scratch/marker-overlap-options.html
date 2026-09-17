@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Overlapping mark options</title>
+  <style>
+    :root {
+      --panel: #1b2028;
+      --cream: #e8edf4;
+      --dim: #9aa6b4;
+      --silence: #3fa79a;
+      --cut: #d1495b;
+      --export: #8bb8ee;
+      --wave: #7eb6c9;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font: 15px/1.4 ui-sans-serif, system-ui, sans-serif;
+      background: #12151a;
+      color: var(--cream);
+    }
+    header { padding: 1.5rem 1.5rem 0.5rem; max-width: 1100px; }
+    h1 { font-size: 1.2rem; font-weight: 600; margin: 0 0 0.4rem; }
+    p { color: var(--dim); margin: 0 0 0.75rem; max-width: 42rem; }
+    .legend {
+      display: flex; gap: 1.25rem; flex-wrap: wrap;
+      font-size: 0.85rem; color: var(--cream); margin: 0.75rem 0 0;
+    }
+    .legend span { display: flex; align-items: center; gap: 0.4rem; }
+    .swatch {
+      width: 22px; height: 14px; border-radius: 2px;
+      border: 1px solid currentColor;
+    }
+    .s { color: var(--silence); background: repeating-linear-gradient(45deg, transparent 0 5px, var(--silence) 5px 6px); }
+    .c { color: var(--cut); background: repeating-linear-gradient(90deg, transparent 0 5px, var(--cut) 5px 6px); }
+    .e { color: var(--export); background: repeating-linear-gradient(0deg, transparent 0 5px, var(--export) 5px 6px); }
+    main { padding: 0.5rem 1.5rem 2rem; display: grid; gap: 1.25rem; }
+    article {
+      background: var(--panel);
+      border: 1px solid #2a3140;
+      border-radius: 8px;
+      padding: 1rem 1rem 1.1rem;
+    }
+    article h2 { margin: 0 0 0.25rem; font-size: 1rem; }
+    article .why { font-size: 0.85rem; margin-bottom: 0.85rem; }
+    .lanes { display: grid; gap: 8px; }
+    .lane {
+      position: relative;
+      height: 88px;
+      background: #161a21;
+      border: 1px solid #2a3140;
+      border-radius: 4px;
+      overflow: hidden;
+    }
+    .wave {
+      position: absolute; inset: 0;
+      background:
+        linear-gradient(#0000, #0000),
+        url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 400 88' preserveAspectRatio='none'%3E%3Cpath fill='none' stroke='%237eb6c9' stroke-width='1.4' d='M0 44 Q20 30 40 44 T80 44 T120 44 T160 38 T200 50 T240 44 T280 40 T320 48 T360 44 T400 44'/%3E%3C/svg%3E");
+      background-size: 100% 100%;
+      opacity: 0.85;
+      pointer-events: none;
+    }
+    .mark { position: absolute; top: 0; bottom: 0; pointer-events: none; }
+    .hatch { position: absolute; inset: 0; }
+    .rail {
+      position: absolute; top: 0; bottom: 0; width: 3px;
+      transform: translateX(-1.5px);
+      z-index: 5;
+    }
+    .cap {
+      position: absolute; top: 0; left: 50%;
+      width: 0; height: 0;
+      transform: translateX(-50%);
+      border-left: 6px solid transparent;
+      border-right: 6px solid transparent;
+      border-top: 9px solid;
+    }
+    .opt1 .silence .hatch {
+      background:
+        repeating-linear-gradient(45deg, transparent 0 9px, rgba(63,167,154,.75) 9px 10px),
+        rgba(63,167,154,.22);
+    }
+    .opt1 .cut .hatch {
+      background:
+        repeating-linear-gradient(90deg, transparent 0 8px, rgba(209,73,91,.8) 8px 9px),
+        rgba(209,73,91,.18);
+    }
+    .opt1 .export .hatch {
+      background:
+        repeating-linear-gradient(0deg, transparent 0 8px, rgba(139,184,238,.85) 8px 9px),
+        rgba(139,184,238,.18);
+    }
+    .opt2 .silence .hatch {
+      background:
+        repeating-linear-gradient(45deg, transparent 0 9px, rgba(63,167,154,.75) 9px 10px),
+        rgba(63,167,154,.18);
+    }
+    .opt2 .cut .hatch {
+      background:
+        repeating-linear-gradient(-45deg, transparent 0 9px, rgba(209,73,91,.8) 9px 10px),
+        rgba(209,73,91,.16);
+    }
+    .opt2 .export .hatch {
+      background:
+        repeating-linear-gradient(90deg, transparent 0 7px, rgba(139,184,238,.9) 7px 8px),
+        rgba(139,184,238,.16);
+    }
+    .opt3 .silence .hatch {
+      background: repeating-linear-gradient(45deg, transparent 0 9px, rgba(63,167,154,.85) 9px 10px);
+    }
+    .opt3 .cut .hatch {
+      background: repeating-linear-gradient(90deg, transparent 0 8px, rgba(209,73,91,.9) 8px 9px);
+    }
+    .opt3 .export .hatch {
+      background: repeating-linear-gradient(0deg, transparent 0 8px, rgba(139,184,238,.95) 8px 9px);
+    }
+    .opt3 .lane::after {
+      content: "";
+      position: absolute;
+      left: 8%; right: 8%; top: 0; bottom: 0;
+      background: rgba(90, 110, 128, 0.28);
+      pointer-events: none;
+    }
+    .silence .rail { background: #3fa79a; }
+    .silence .cap { color: #3fa79a; border-top-color: #3fa79a; }
+    .cut .rail { background: #d1495b; }
+    .cut .cap { color: #d1495b; border-top-color: #d1495b; }
+    .export .rail { background: #8bb8ee; }
+    .export .cap { color: #8bb8ee; border-top-color: #8bb8ee; }
+    .times {
+      position: relative; height: 18px; margin-top: 4px;
+      font: 11px ui-monospace, Menlo, monospace; color: var(--dim);
+    }
+    .times b { position: absolute; transform: translateX(-50%); font-weight: 500; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Three ways to read stacked marks</h1>
+    <p>
+      Same span as your screenshot: silence across most of the take, a cut in the middle,
+      export overlapping the right half. Hatches stack. Start/end rails are solid (no alpha).
+    </p>
+    <div class="legend">
+      <span><i class="swatch s"></i> silence · teal · diagonal</span>
+      <span><i class="swatch c"></i> cut · red · vertical</span>
+      <span><i class="swatch e"></i> export · blue · horizontal</span>
+    </div>
+  </header>
+  <main>
+    <article class="opt1">
+      <h2>1. Your hatch directions + typed rails</h2>
+      <p class="why">
+        Silence stays the diagonal you already know. Cut is vertical stripes. Export is horizontal
+        (vertical was already taken by cut). Fill still tints by type. Rails are opaque type color.
+      </p>
+      <div class="lanes" data-demo></div>
+    </article>
+    <article class="opt2">
+      <h2>2. Opposite diagonals, vertical export</h2>
+      <p class="why">
+        Silence / , cut \ , export |. Three orientations, none shared. Same opaque rails.
+        Overlap reads as a woven plaid instead of a mud puddle.
+      </p>
+      <div class="lanes" data-demo></div>
+    </article>
+    <article class="opt3">
+      <h2>3. One shared fill, hatches and rails do the talking</h2>
+      <p class="why">
+        One grey band wherever any mark exists, so stacked fills don't go dark. Type only shows
+        in hatch direction and in the solid start/end colors sitting on top.
+      </p>
+      <div class="lanes" data-demo></div>
+    </article>
+  </main>
+  <script>
+    const marks = [
+      { type: "silence", left: 8, right: 92 },
+      { type: "cut", left: 34, right: 70 },
+      { type: "export", left: 48, right: 88 },
+    ];
+    function rail(side, pct) {
+      const el = document.createElement("div");
+      el.className = "rail";
+      el.style.left = pct + "%";
+      el.innerHTML = '<i class="cap"></i>';
+      return el;
+    }
+    function band(mark) {
+      const el = document.createElement("div");
+      el.className = "mark " + mark.type;
+      el.style.left = mark.left + "%";
+      el.style.width = (mark.right - mark.left) + "%";
+      el.innerHTML = '<div class="hatch"></div>';
+      el.append(rail("start", 0), rail("end", 100));
+      return el;
+    }
+    function lane() {
+      const el = document.createElement("div");
+      el.className = "lane";
+      el.innerHTML = '<div class="wave"></div>';
+      for (const mark of marks) el.append(band(mark));
+      return el;
+    }
+    function times() {
+      const el = document.createElement("div");
+      el.className = "times";
+      const labels = [
+        [8, "s", "var(--silence)"],
+        [34, "c", "var(--cut)"],
+        [48, "e", "var(--export)"],
+        [70, "c", "var(--cut)"],
+        [88, "e", "var(--export)"],
+        [92, "s", "var(--silence)"],
+      ];
+      for (const [x, letter, color] of labels) {
+        const b = document.createElement("b");
+        b.textContent = letter;
+        b.style.left = x + "%";
+        b.style.color = color;
+        el.append(b);
+      }
+      return el;
+    }
+    for (const host of document.querySelectorAll("[data-demo]")) {
+      host.append(lane(), lane(), times());
+    }
+  </script>
+</body>
+</html>

@@ -1,4 +1,4 @@
-export type MarkerType = "silence" | "cut";
+export type MarkerType = "silence" | "cut" | "export";
 
 export interface TimelineMarker {
   id: string;
@@ -113,6 +113,11 @@ export class MarkerList {
     this.items = next;
   }
 
+  remove(ids: string[]): void {
+    const drop = new Set(ids);
+    this.items = this.items.filter((marker) => !drop.has(marker.id));
+  }
+
   replace(markers: TimelineMarker[]): void {
     this.items = markers.map(clone);
     let max = 0;
@@ -141,7 +146,18 @@ export class MarkerList {
       .sort((a, b) => a.start - b.start);
   }
 
+  exportsOn(laneId: string): { start: number; end: number }[] {
+    return this.items
+      .filter((marker) => marker.type === "export" && marker.laneIds.includes(laneId))
+      .map((marker) => ({ start: marker.start, end: marker.end }))
+      .sort((a, b) => a.start - b.start);
+  }
+
   private mergeIn(incoming: TimelineMarker): void {
+    if (incoming.type === "export") {
+      this.items = [...this.items, incoming];
+      return;
+    }
     const key = lanesKey(incoming.laneIds);
     const kept: TimelineMarker[] = [];
     let pending = incoming;

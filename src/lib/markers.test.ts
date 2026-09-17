@@ -101,4 +101,29 @@ describe("MarkerList", () => {
       laneIds: ["a", "b"],
     });
   });
+
+  it("two overlapping export marks both remain", () => {
+    const list = new MarkerList(["a", "b"]);
+    list.add("export", 1, 3, ["a"]);
+    list.add("export", 2, 4, ["a"]);
+    expect(list.all()).toHaveLength(2);
+  });
+
+  it("export may be one lane or both synced", () => {
+    const list = new MarkerList(["a", "b"]);
+    list.add("export", 1, 2, ["a"]);
+    list.add("export", 3, 4, ["a", "b"]);
+    expect(list.all()).toEqual([
+      expect.objectContaining({ type: "export", start: 1, end: 2, laneIds: ["a"] }),
+      expect.objectContaining({ type: "export", start: 3, end: 4, laneIds: ["a", "b"] }),
+    ]);
+  });
+
+  it("silence cut and export may share source time", () => {
+    const list = new MarkerList(["a", "b"]);
+    list.add("silence", 1, 3, ["a"]);
+    list.add("cut", 1, 3, ["a"]);
+    list.add("export", 1, 3, ["a"]);
+    expect(list.all().map((marker) => marker.type)).toEqual(["silence", "cut", "export"]);
+  });
 });

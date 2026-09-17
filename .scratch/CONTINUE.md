@@ -18,38 +18,15 @@ Read this file when the user says **continue**, **delivery**, **TDD**, or **arch
 
 | Item | State |
 |------|--------|
-| Branch | `tdd/program` |
-| Latest | markers 02 type-change; export-session 01 merge+stereo; transcript find (literal phrase, case-insensitive, multi-word) |
-| Frontier | markers 03 |
+| Branch | current |
+| Latest | workflow only — no in-flight program |
+| Frontier | none |
 
 ## Next
 
-- `.scratch/markers/issues/03-select-list-remove.md` — mutex MARKERS — **Blocked by 02: done**
+_(empty)_
 
-Do not start export-session 02: it is blocked by markers 04. Transcript-search has no further tickets.
-
-## Where to look
-
-Do not scan the repo first.
-
-1. `.scratch/markers/issues/03-select-list-remove.md`
-2. `.scratch/WORKER.md`
-3. `.scratch/markers/TDD.md` `## 03`
-4. Locked **Select** bullet in `.scratch/DELIVERY.md`
-
-**First red (name must match):** `it("removing the selected marks is one undo step")`  
-Known: two silence marks; select both ids; remove; `all()` `[]`; undo restores both ids.  
-**Prove red:** `npm test -- src/lib/editor.svelte.test.ts`
-
-**Code to open (not a tour):**
-- `src/lib/editor.svelte.ts` — `markerList` is source of truth; `setType(id, type)` exists; **no selected-mark ids yet**
-- `src/lib/markers.ts` — `add` / `resize` / `subtract` / `replace` / `setType` / `all`; **no select API**
-- `src/routes/+page.svelte` Edits pane — type change is **one row at a time** (`Change to cut` / `Change to silence`); 03 must make type change apply to a multi-selection
-- Tests: `src/lib/editor.svelte.test.ts`, `src/lib/markers.test.ts`
-
-**Leave alone:** `TranscriptPanel` find (`transcriptFindHits` in `src/lib/transcript.ts`); export `merge` / stereo in `exportSession.ts` / `FileMenu.svelte`; export mark **type** (04).
-
-**After 03:** `.scratch/markers/issues/04-export-mark-type.md` (Mark action `export`; overlapping export marks stay two records). Then `.scratch/export-session/issues/02-clips-scope.md`.
+When starting a program: add area folders with `TDD.md` + `issues/`, grant mutexes in `DELIVERY.md`, put one ready ticket path in **Next**. Deferred (not tickets): `.scratch/later.md`.
 
 ## Pointers
 

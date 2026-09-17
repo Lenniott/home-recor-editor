@@ -27,7 +27,7 @@ Props: `variant` primary | secondary | tertiary · `toggle` · `icon` none | lef
 | `src/lib/components/TranscriptPanel.svelte` | Transcribe all, Download model | `variant="primary"` |
 | `src/lib/components/TranscriptPanel.svelte` | Retry, Download again, Cancel, Mark/Unmark/Clear | `variant="secondary"` |
 | `src/routes/+page.svelte` | pane tabs | `variant="secondary"` `toggle` `pressed={tab === name}` |
-| `src/routes/+page.svelte` | Change to cut / Change to silence | `variant="secondary"` |
+| `src/lib/components/MarksList.svelte` | Change to cut / Change to silence / Remove | `variant="secondary"` |
 | `src/routes/+page.svelte` | cut/silence time + Unmark rows | `variant="secondary"` |
 | `src/routes/+page.svelte` | Panels | `variant="secondary"` `icon="left"` `glyph` (`IconChevron`) `toggle` `bind:pressed={paneOpen}` `tooltip` |
 | `src/routes/+page.svelte` | Fit recording | `variant="secondary"` |

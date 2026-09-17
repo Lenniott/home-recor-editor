@@ -103,6 +103,23 @@ export function conversationParagraphs(
     .sort((a, b) => a.start - b.start || a.end - b.end);
 }
 
+export type ExportTranscriptLine = { clock: number; speaker: string; text: string };
+
+/** Speaker turns for a transcript file: clock + name, then that run of words. */
+export function formatExportTranscript(lines: ExportTranscriptLine[]): string {
+  const sorted = [...lines].sort((a, b) => a.clock - b.clock);
+  const blocks: { clock: number; speaker: string; words: string[] }[] = [];
+  for (const line of sorted) {
+    const last = blocks[blocks.length - 1];
+    if (last && last.speaker === line.speaker) last.words.push(line.text);
+    else blocks.push({ clock: line.clock, speaker: line.speaker, words: [line.text] });
+  }
+  if (blocks.length === 0) return "";
+  return blocks
+    .map((block) => `${formatTranscriptClock(block.clock)} ${block.speaker}\n${block.words.join(" ")}`)
+    .join("\n\n") + "\n";
+}
+
 export function formatTranscriptClock(seconds: number): string {
   const total = Math.max(0, Math.round(Number.isFinite(seconds) ? seconds : 0));
   const minutes = Math.floor(total / 60);

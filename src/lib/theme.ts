@@ -23,6 +23,9 @@ export const theme = {
   /** Shared cuts: time removed from every track at once. Red, since unlike a silence it takes the timeline with it. */
   cutFill: "rgba(209, 73, 91, 0.28)",
   cutBorder: "rgba(209, 73, 91, 0.9)",
+  /** Export marks: no audio effect. Same edge ticks as silence/cut; amber so they don't read as a mute or a cut. */
+  exportFill: "rgba(139, 184, 238, 0.28)",
+  exportBorder: "rgba(139, 184, 238, 0.9)",
   /** A cut suggestion — proposed, not applied, so it's drawn as an outline rather than a solid band. */
   suggestionFill: "rgba(226, 163, 60, 0.18)",
   suggestionBorder: "rgba(226, 163, 60, 0.85)",

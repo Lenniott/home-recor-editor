@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { speechWindows, restoreSpeechTimes } from "./audio/speechTimeline";
 import {
   conversationParagraphs,
+  formatExportTranscript,
   formatParagraphClock,
   formatTranscriptClock,
   parseTranscript,
@@ -116,6 +117,16 @@ describe("conversation paragraphs", () => {
     expect(formatTranscriptClock(0.59)).toBe("00:01");
     expect(formatParagraphClock(0.59, 5.8)).toBe("00:01–00:06");
     expect(formatParagraphClock(0.8, 1.2)).toBe("00:01");
+  });
+
+  it("joins same-speaker words into one paragraph, not one word per line", () => {
+    expect(
+      formatExportTranscript([
+        { clock: 1, speaker: "Alex", text: "Welcome" },
+        { clock: 1.2, speaker: "Alex", text: "thanks" },
+        { clock: 3, speaker: "Sam", text: "Hello" },
+      ]),
+    ).toBe("00:01 Alex\nWelcome thanks\n\n00:03 Sam\nHello\n");
   });
 });
 

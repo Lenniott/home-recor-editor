@@ -70,6 +70,22 @@ export function mergeFileName(stem: string): string {
   return `${stem}-merge.wav`;
 }
 
+/** Combined merge of one export-mark clip, 1-based in start-time write order. */
+export function clipFileName(stem: string, index: number): string {
+  return `${stem}-clip-${index}.wav`;
+}
+
+/** Transcript beside that clip: `{stem}-clip-{n}.txt`. */
+export function clipTranscriptFileName(stem: string, index: number): string {
+  return `${stem}-clip-${index}.txt`;
+}
+
+/** Separate-layout clip name: `{stem}-clip-{n}-{speaker}.wav`. */
+export function clipSeparateFileName(stem: string, index: number, speaker: string, laneIndex: number): string {
+  const part = sanitizeFileNamePart(speaker, `track-${laneIndex + 1}`);
+  return `${stem}-clip-${index}-${part}.wav`;
+}
+
 /**
  * Join a picked directory and a file name. The separator comes from the
  * directory itself so a Windows path stays backslashed, rather than

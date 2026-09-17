@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { buildPlaybackPlan } from "./audio/playbackPlan";
 import { EditorState, type TrackState } from "./editor.svelte";
 import type { ProjectFile } from "./projectFile";
-import type { PodcastProject } from "./projectV2";
+import { parsePodcastProject, serializePodcastProject, type PodcastProject } from "./projectV2";
 import { vadDetector } from "./vadDetector";
 import { vadDetectOptions } from "./audio/sileroThresholds";
 
@@ -620,6 +620,35 @@ describe("unified marker actions and zoom", () => {
     expect("convertAllSilencesToCuts" in e).toBe(false);
   });
 
+  it("removing the selected marks is one undo step", () => {
+    const e = twoTrackEditor();
+    e.setBufferMs(0, e.tracks[0]);
+    mark(e, e.tracks[0], 1, 2);
+    mark(e, e.tracks[0], 3, 4);
+    const ids = e.markerList.all().map((marker) => marker.id);
+    expect(ids).toHaveLength(2);
+    e.selectMarks(ids);
+    e.removeSelectedMarks();
+    expect(e.markerList.all()).toEqual([]);
+    e.undo();
+    expect(e.markerList.all().map((marker) => marker.id)).toEqual(ids);
+  });
+
+  it("setType on every selected id is one undo", () => {
+    const e = twoTrackEditor();
+    e.setBufferMs(0, e.tracks[0]);
+    mark(e, e.tracks[0], 1, 2);
+    mark(e, e.tracks[0], 4, 5);
+    const ids = e.markerList.all().map((marker) => marker.id);
+    e.selectMarks(ids);
+    e.setSelectedType("cut");
+    expect(e.markerList.all().map((marker) => marker.type)).toEqual(["cut", "cut"]);
+    e.undo();
+    expect(e.markerList.all().map((marker) => ({ id: marker.id, type: marker.type }))).toEqual(
+      ids.map((id) => ({ id, type: "silence" })),
+    );
+  });
+
   it("type change is one undo step", () => {
     const e = twoTrackEditor();
     e.setBufferMs(0, e.tracks[0]);
@@ -668,6 +697,40 @@ describe("unified marker actions and zoom", () => {
     expect(e.displayKeptDuration).toBe(10);
     e.undo();
     expect(e.cuts).toHaveLength(2);
+  });
+
+  it("dragging an export mark edge changes times without merging an overlap", () => {
+    const e = twoTrackEditor();
+    e.markerAction = "export";
+    e.setSelection(1, 3, [e.tracks[0].id]);
+    e.markAction();
+    e.setSelection(2, 4, [e.tracks[0].id]);
+    e.markAction();
+    const [first, second] = e.markerList.all().filter((marker) => marker.type === "export");
+    e.commitEdit(() => {
+      e.moveExport(first.id, "end", 3.5);
+      e.moveExport(second.id, "start", 2.2);
+    });
+    const exports = e.markerList.all().filter((marker) => marker.type === "export");
+    expect(exports).toHaveLength(2);
+    expect(exports[0]).toEqual(expect.objectContaining({ id: first.id, start: 1, end: 3.5 }));
+    expect(exports[1]).toEqual(expect.objectContaining({ id: second.id, start: 2.2, end: 4 }));
+  });
+
+  it("Mark in export action uses selected lanes like silence", () => {
+    const e = twoTrackEditor();
+    e.markerAction = "export";
+    e.setSelection(1, 2, e.tracks.map((track) => track.id));
+    e.markAction();
+    const exports = e.markerList.all().filter((marker) => marker.type === "export");
+    expect(exports).toHaveLength(1);
+    expect(exports[0].laneIds).toEqual(e.tracks.map((track) => track.id));
+    e.markerAction = "export";
+    e.setSelection(3, 4, [e.tracks[0].id]);
+    e.markAction();
+    const oneLane = e.markerList.all().filter((marker) => marker.type === "export" && marker.start === 3);
+    expect(oneLane).toHaveLength(1);
+    expect(oneLane[0].laneIds).toEqual([e.tracks[0].id]);
   });
 
   it("editor Mark on both selected lanes creates one id", () => {
@@ -744,6 +807,20 @@ describe("track document round-trip", () => {
     expect(silences).toHaveLength(1);
     expect(silences[0].laneIds).toEqual(reloaded.tracks.map((track) => track.id));
     expect(reloaded.tracks.map((track) => track.rawMarkers)).toEqual([[{ start: 1, end: 2 }], [{ start: 1, end: 2 }]]);
+  });
+
+  it("save/reload keeps export marks", () => {
+    const editor = twoTrackEditor();
+    editor.markerAction = "export";
+    editor.setSelection(1, 3, [editor.tracks[0].id]);
+    editor.markAction();
+    const saved = editor.toProjectV2("/rec/dual.hre.json");
+    const parsed = parsePodcastProject(serializePodcastProject(saved));
+    const reloaded = twoTrackEditor();
+    reloaded.applyProjectV2(parsed, "/rec/dual.hre.json");
+    expect(reloaded.markerList.all().filter((marker) => marker.type === "export")).toEqual([
+      expect.objectContaining({ type: "export", start: 1, end: 3, laneIds: [reloaded.tracks[0].id] }),
+    ]);
   });
 
   it("applyProjectV2 with two saved tracks and one loaded lane does not copy the second track's marks onto the first", () => {
