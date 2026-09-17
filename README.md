@@ -39,7 +39,7 @@ Transcripts save with the project and reload with it — no re-transcribing afte
 
 Each project records its recording's content hash (SHA-256) and duration. Opening a project requires all referenced recordings and matching source identities. Missing sources can be relinked; changed sources are rejected before replacing the current project. Zero-width silence marks in a saved file are ignored on open rather than rejecting the project. Legacy duration mismatches require the original recording. Project files predating this format (version 1, marks/settings only, no transcript) still restore by importing the recording beside the sidecar and upgrade to the current format on next save.
 
-**Delivery / TDD program:** agents continue from `.scratch/CONTINUE.md` (branch `tdd/program`).
+Agents pick up queued work from `.scratch/CONTINUE.md` when asked to continue.
 
 ## Cleanup workflow
 
