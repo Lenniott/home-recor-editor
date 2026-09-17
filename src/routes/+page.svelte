@@ -4,31 +4,18 @@
   import { renderEdited } from "$lib/audio/applyEdits";
   import { decodeAudioFile, mixToMono } from "$lib/audio/decode";
   import { encodeWav } from "$lib/audio/encodeWav";
-  import {
-    alignRenders,
-    combineRenders,
-    frameCount,
-    padToFrames,
-    renderForExport,
-  } from "$lib/audio/exportMix";
   import { editor } from "$lib/editor.svelte";
-  import {
-    joinPath,
-    mixFileName,
-    projectStem,
-    separateTrackFileNames,
-  } from "$lib/exportNames";
   import { sha256Hex } from "$lib/hash";
   import { player } from "$lib/player";
+  import { resolveSourcePath, type PodcastProject } from "$lib/projectV2";
   import {
-    parsePodcastProject,
-    resolveSourcePath,
-    type PodcastProject,
-  } from "$lib/projectV2";
-  import {
+    AUTOSAVE_DELAY_MS,
+    openProjectFile,
     openRecordings,
     saveProject as writeProjectFile,
+    scheduleAutosave,
   } from "$lib/projectSession";
+  import { runExport } from "$lib/exportSession";
   import { vadDetector } from "$lib/vadDetector";
   import PageLayout from "$lib/components/baseline/PageLayout.svelte";
   import Toolbar, {
@@ -67,7 +54,19 @@
   ];
   const PROJECT_FILTER = [{ name: "Recor Project", extensions: ["json"] }];
   /** Debounce so a run of quick edits (a drag, a settings slider) writes once, not on every intermediate tick. */
-  const AUTOSAVE_DELAY_MS = 1500;
+  let autosaveTimer: ReturnType<typeof setTimeout> | undefined;
+
+  type TestDesktopIo = {
+    files: Record<string, Uint8Array | string>;
+    pickFiles?: string[] | null;
+    pickFile?: string | null;
+    pickSave?: string | null;
+    pickDirectory?: string | null;
+  };
+
+  function testDesktop(): TestDesktopIo | undefined {
+    return (globalThis as { __HRE_TEST__?: TestDesktopIo }).__HRE_TEST__;
+  }
 
   interface LoadedAudio {
     buffer: AudioBuffer;
@@ -88,7 +87,6 @@
   let exportError: string | null = $state(null);
   let exportStatus: string | null = $state(null);
   let exportStatusTimeout: ReturnType<typeof setTimeout> | undefined;
-  let autosaveTimer: ReturnType<typeof setTimeout> | undefined;
 
   const showCutLane = $derived(
     editor.tracks.length > 1 ||
@@ -97,6 +95,12 @@
   );
 
   async function readAudioBytes(path: string): Promise<Uint8Array> {
+    const io = testDesktop();
+    if (io) {
+      const data = io.files[path];
+      if (data instanceof Uint8Array) return data.slice();
+      throw new Error(`No virtual audio at ${path}`);
+    }
     // The command returns a raw ipc::Response, which invoke() surfaces as an
     // ArrayBuffer. Falls back to a plain number array on platforms where that
     // isn't supported, matching how @tauri-apps/plugin-fs handles the same case.
@@ -109,6 +113,21 @@
   }
 
   function tauriDesktop() {
+    const io = testDesktop();
+    if (io) {
+      return {
+        readAudio: readAudioBytes,
+        readText: async (path: string) => {
+          const data = io.files[path];
+          return typeof data === "string" ? data : null;
+        },
+        writeText: async (path: string, contents: string) => {
+          io.files[path] = contents;
+        },
+        decodeAudio: (bytes: Uint8Array) =>
+          decodeAudioFile(bytes, player.getContext()),
+      };
+    }
     return {
       readAudio: readAudioBytes,
       readText: (path: string) =>
@@ -140,6 +159,12 @@
   }
 
   async function pickAudio(title?: string): Promise<string | null> {
+    const io = testDesktop();
+    if (io) {
+      const selected = io.pickFile ?? null;
+      io.pickFile = undefined;
+      return selected;
+    }
     const selected = await open({
       multiple: false,
       title,
@@ -149,6 +174,12 @@
   }
 
   async function pickAudioFiles(): Promise<string[] | null> {
+    const io = testDesktop();
+    if (io) {
+      const selected = io.pickFiles ?? null;
+      io.pickFiles = undefined;
+      return selected;
+    }
     const selected = await open({
       multiple: true,
       title: "Import recordings (one or two synced tracks)",
@@ -332,7 +363,13 @@
 
     let selected: string | string[] | null;
     try {
-      selected = await open({ multiple: false, filters: PROJECT_FILTER });
+      const io = testDesktop();
+      if (io) {
+        selected = io.pickFile ?? null;
+        io.pickFile = undefined;
+      } else {
+        selected = await open({ multiple: false, filters: PROJECT_FILTER });
+      }
     } catch (err) {
       loadError = describeError(err);
       return;
@@ -341,17 +378,13 @@
 
     isLoading = true;
     try {
-      const text = await invoke<string | null>("read_text_file", {
+      const result = await openProjectFile({
         path: selected,
+        desktop: tauriDesktop(),
+        editor,
+        locate: async (name) => pickAudio(`Locate "${name}"`),
       });
-      if (!text) throw new Error("Project file not found.");
-      let project: PodcastProject;
-      try {
-        project = parsePodcastProject(text);
-      } catch (err) {
-        throw new Error(`Not a valid project file: ${describeError(err)}`);
-      }
-      await openParsedProject(project, selected, null, true);
+      loadError = result.error;
     } catch (err) {
       loadError = describeError(err);
     } finally {
@@ -392,10 +425,16 @@
     const stem = (editor.fileName ?? "project").replace(/\.[^./\\]+$/, "");
     let destination: string | null;
     try {
-      destination = await save({
-        defaultPath: `${stem}.hre.json`,
-        filters: PROJECT_FILTER,
-      });
+      const io = testDesktop();
+      if (io) {
+        destination = io.pickSave ?? null;
+        io.pickSave = undefined;
+      } else {
+        destination = await save({
+          defaultPath: `${stem}.hre.json`,
+          filters: PROJECT_FILTER,
+        });
+      }
     } catch (err) {
       saveError = describeError(err);
       return;
@@ -417,8 +456,16 @@
     const dirty = editor.dirty;
     const path = editor.projectPath;
     clearTimeout(autosaveTimer);
-    if (dirty && path && !saving && !failed && !loading)
-      autosaveTimer = setTimeout(() => void saveProject(), AUTOSAVE_DELAY_MS);
+    autosaveTimer =
+      scheduleAutosave({
+        editor,
+        desktop: tauriDesktop(),
+        blockedSavePath,
+        delayMs: AUTOSAVE_DELAY_MS,
+        saving,
+        failed: Boolean(failed),
+        loading,
+      }) ?? undefined;
   });
 
   /** What one two-track Export action writes: one WAV per track, one combined mix, or both. */
@@ -445,7 +492,13 @@
     channels: Float32Array[],
     sampleRate: number,
   ): Promise<void> {
-    await invoke("write_audio_file", encodeWav(channels, sampleRate), {
+    const bytes = encodeWav(channels, sampleRate);
+    const io = testDesktop();
+    if (io) {
+      io.files[path] = bytes;
+      return;
+    }
+    await invoke("write_audio_file", bytes, {
       headers: { path: encodeURIComponent(path) },
     });
   }
@@ -497,10 +550,16 @@
     const stem = (track.fileName ?? "export").replace(/\.[^./\\]+$/, "");
     let destination: string | null;
     try {
-      destination = await save({
-        defaultPath: `${stem}-edited.wav`,
-        filters: [{ name: "WAV", extensions: ["wav"] }],
-      });
+      const io = testDesktop();
+      if (io) {
+        destination = io.pickSave ?? null;
+        io.pickSave = undefined;
+      } else {
+        destination = await save({
+          defaultPath: `${stem}-edited.wav`,
+          filters: [{ name: "WAV", extensions: ["wav"] }],
+        });
+      }
     } catch (err) {
       exportError = describeError(err);
       return;
@@ -560,7 +619,6 @@
     });
     if (loaded.length < 2) return;
     const cuts = editor.cuts.map((r) => ({ ...r }));
-    const exportStem = projectStem(editor.fileName);
 
     exportError = null;
     // Lining two rates up means resampling, which is out of scope — say so
@@ -578,11 +636,17 @@
 
     let directory: string | string[] | null;
     try {
-      directory = await open({
-        directory: true,
-        multiple: false,
-        title: "Choose a folder for the exported files",
-      });
+      const io = testDesktop();
+      if (io) {
+        directory = io.pickDirectory ?? null;
+        io.pickDirectory = undefined;
+      } else {
+        directory = await open({
+          directory: true,
+          multiple: false,
+          title: "Choose a folder for the exported files",
+        });
+      }
     } catch (err) {
       exportError = describeError(err);
       return;
@@ -592,68 +656,24 @@
     isExporting = true;
     exportStatus = null;
     try {
-      // `markedIntervals` rather than `mutedIntervalsFor`: an export is
-      // always of the edited project, even while the transport is
-      // auditioning the original — same as the single-track export.
-      const longestFrames = Math.max(...loaded.map((t) => t.buffer.length));
-      const stagedRenders: Float32Array[][] = [];
-      for (const [index, entry] of loaded.entries()) {
-        await showExportProgress(
-          0.08 + (0.34 * index) / loaded.length,
-          `Rendering ${entry.speaker}`,
-        );
-        stagedRenders.push(
-          renderForExport(
-            padToFrames(trackChannels(entry.buffer), longestFrames),
-            sampleRate,
-            entry.muted,
-            cuts,
-          ),
-        );
-      }
-      const renders = alignRenders(stagedRenders);
-      if (frameCount(renders[0]) === 0) {
-        throw new Error(
-          "Nothing left to export — the cuts cover the whole project.",
-        );
-      }
-
-      const stem = exportStem;
-      let written = 0;
-      const fileTotal =
-        mode === "both"
-          ? loaded.length + 1
-          : mode === "separate"
-            ? loaded.length
-            : 1;
-      if (mode !== "mix") {
-        const names = separateTrackFileNames(
-          stem,
-          loaded.map((entry) => entry.speaker),
-        );
-        for (const [index, name] of names.entries()) {
-          await showExportProgress(
-            0.5 + (0.45 * written) / fileTotal,
-            `Writing ${name}`,
-          );
-          await writeWav(joinPath(directory, name), renders[index], sampleRate);
-          written++;
-        }
-      }
-      if (mode !== "separate") {
-        await showExportProgress(
-          0.5 + (0.45 * written) / fileTotal,
-          "Mixing and writing combined WAV",
-        );
-        await writeWav(
-          joinPath(directory, mixFileName(stem)),
-          combineRenders(renders),
-          sampleRate,
-        );
-        written++;
-      }
-      await showExportProgress(1, "Export complete");
-      flashExported(written);
+      const result = await runExport({
+        mode,
+        tracks: loaded.map((entry) => ({
+          channels: trackChannels(entry.buffer),
+          sampleRate: entry.buffer.sampleRate,
+          speaker: entry.speaker,
+          muted: entry.muted,
+          fileName: editor.fileName,
+        })),
+        cuts,
+        directory,
+        writeWav,
+        onProgress: (progress, stage) => {
+          void showExportProgress(progress, stage);
+        },
+      });
+      if (result.error) throw new Error(result.error);
+      flashExported(result.written);
     } catch (err) {
       exportError = describeError(err);
     } finally {
