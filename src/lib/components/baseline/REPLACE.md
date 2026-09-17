@@ -22,12 +22,12 @@ Props: `variant` primary | secondary | tertiary · `toggle` · `icon` none | lef
 | `src/lib/components/TrackLane.svelte` | Edit / Editing | `variant="secondary"` `toggle` `icon="left"` `glyph` (`IconRadio`) `tooltip` |
 | `src/lib/components/TrackLane.svelte` | Remove | `variant="secondary"` `tooltip` |
 | `src/lib/components/FileMenu.svelte` | File | `variant="secondary"` `toggle` `bind:pressed={menuOpen}` |
-| `src/lib/components/FileMenu.svelte` | Export choices (Separate / Mix / Both / Export edited) | `variant="primary"` |
+| `src/lib/components/FileMenu.svelte` | Export choices (Separate / Combined merge / Both / Export edited) | `variant="primary"` |
 | `src/lib/components/FileMenu.svelte` | Cancel / Done / Close | `variant="secondary"` |
 | `src/lib/components/TranscriptPanel.svelte` | Transcribe all, Download model | `variant="primary"` |
 | `src/lib/components/TranscriptPanel.svelte` | Retry, Download again, Cancel, Mark/Unmark/Clear | `variant="secondary"` |
 | `src/routes/+page.svelte` | pane tabs | `variant="secondary"` `toggle` `pressed={tab === name}` |
-| `src/routes/+page.svelte` | Convert all silences to shared cuts | `variant="primary"` |
+| `src/routes/+page.svelte` | Change to cut / Change to silence | `variant="secondary"` |
 | `src/routes/+page.svelte` | cut/silence time + Unmark rows | `variant="secondary"` |
 | `src/routes/+page.svelte` | Panels | `variant="secondary"` `icon="left"` `glyph` (`IconChevron`) `toggle` `bind:pressed={paneOpen}` `tooltip` |
 | `src/routes/+page.svelte` | Fit recording | `variant="secondary"` |

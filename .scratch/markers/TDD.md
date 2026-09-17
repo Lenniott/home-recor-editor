@@ -48,7 +48,7 @@ Known: two silence marks; select both ids; remove; `all()` `[]`; undo restores b
 
 **Prove red:** `npm test -- src/lib/editor.svelte.test.ts`
 
-**Next reds:** Cmd/Ctrl+A with a lane focused selects every mark; list shows all current marks; Backspace with a mark selected deletes (component or editor test, not Playwright unless e2e already covers keys).
+**Next reds:** Cmd/Ctrl+A with a lane focused selects every mark; list shows all current marks; Backspace with a mark selected deletes (component or editor test, not Playwright unless e2e already covers keys); `setType` on every selected id is one undo (ticket AC).
 
 **Out of scope:** filter/hidden, export type.
 

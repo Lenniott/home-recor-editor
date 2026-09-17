@@ -615,24 +615,36 @@ describe("all-track analysis and speech scope", () => {
 
 
 describe("unified marker actions and zoom", () => {
-  it("converts every silence marker into shared cuts as one undoable edit", () => {
+  it("has no convert-all silences to cuts", () => {
+    const e = twoTrackEditor();
+    expect("convertAllSilencesToCuts" in e).toBe(false);
+  });
+
+  it("type change is one undo step", () => {
     const e = twoTrackEditor();
     e.setBufferMs(0, e.tracks[0]);
     e.setBufferMs(0, e.tracks[1]);
-    mark(e, e.tracks[0], 1, 3);
-    mark(e, e.tracks[1], 2, 4);
-    e.addCut({start: 7, end: 8});
-
-    e.convertAllSilencesToCuts();
-
-    expect(e.cuts).toEqual([{start: 1, end: 4}, {start: 7, end: 8}]);
-    expect(e.tracks.map(track => track.rawMarkers)).toEqual([[], []]);
+    mark(e, e.tracks[0], 1, 2);
+    const id = e.markerList.all()[0].id;
+    e.setType(id, "cut");
+    expect(e.markerList.all()).toHaveLength(1);
+    expect(e.markerList.all()[0]).toMatchObject({
+      type: "cut",
+      start: 1,
+      end: 2,
+      laneIds: [e.tracks[0].id, e.tracks[1].id],
+    });
+    expect(e.cuts).toEqual([{ start: 1, end: 2 }]);
+    expect(e.tracks.map((track) => track.rawMarkers)).toEqual([[], []]);
     e.undo();
-    expect(e.cuts).toEqual([{start: 7, end: 8}]);
-    expect(e.tracks.map(track => track.rawMarkers)).toEqual([
-      [{start: 1, end: 3}],
-      [{start: 2, end: 4}],
-    ]);
+    expect(e.markerList.all()[0]).toMatchObject({
+      type: "silence",
+      start: 1,
+      end: 2,
+      laneIds: [e.tracks[0].id],
+    });
+    expect(e.cuts).toEqual([]);
+    expect(e.tracks[0].rawMarkers).toEqual([{ start: 1, end: 2 }]);
   });
 
   it("marks, trims, and undoes either action through the same interface", () => {

@@ -9,6 +9,7 @@
     formatParagraphClock,
     visualWordRange,
     wordsAtOffsets,
+    transcriptFindHits,
   } from "$lib/transcript";
   import Button from "$lib/components/baseline/Button.svelte";
 
@@ -16,6 +17,11 @@
     showSelectionActions = true,
     compact = false,
   }: { showSelectionActions?: boolean; compact?: boolean } = $props();
+  let findQuery = $state("");
+  let findFieldEl: HTMLInputElement | undefined = $state();
+  const findEnabled = $derived(
+    editor.tracks.some((track) => track.transcriptStatus === "complete"),
+  );
   const transcript = new Transcription();
   let queue: TrackState[] = [];
   let running: TrackState | null = $state(null);
@@ -156,6 +162,39 @@
     });
     return marked;
   });
+  const findHits = $derived.by(() => {
+    const order = turns.flatMap((turn) => turn.indices);
+    return new Set(
+      transcriptFindHits(
+        order.map((index) => words[index].text),
+        findQuery,
+      ).map((offset) => order[offset]!),
+    );
+  });
+  const findHitList = $derived(
+    turns.flatMap((turn) => turn.indices).filter((index) => findHits.has(index)),
+  );
+  let findCursor = $state(0);
+  const findCurrentIndex = $derived(
+    findHitList.length
+      ? findHitList[
+          ((findCursor % findHitList.length) + findHitList.length) %
+            findHitList.length
+        ]
+      : -1,
+  );
+  function stepFind(delta: number): void {
+    const n = findHitList.length;
+    if (!n) return;
+    findCursor = (findCursor + delta + n) % n;
+  }
+  function findShortcut(event: KeyboardEvent): void {
+    if (!(event.metaKey || event.ctrlKey) || event.altKey) return;
+    if (event.key !== "f" && event.key !== "F") return;
+    if (!findFieldEl || findFieldEl.disabled) return;
+    event.preventDefault();
+    findFieldEl.focus();
+  }
   const cutWords = $derived.by(() => {
     let region = 0;
     return words.map((word) => {
@@ -172,6 +211,7 @@
   let previousCurrent = new Set<number>();
   $effect(() => {
     const active = currentWords;
+    const finding = findHits.size > 0;
     const container = root;
     if (!container) return;
     untrack(() => {
@@ -180,6 +220,7 @@
           '[data-word="' + index + '"]',
         );
         element?.classList.toggle("current", active.has(index));
+        if (finding) continue;
         if (active.has(index)) element?.setAttribute("aria-current", "true");
         else element?.removeAttribute("aria-current");
       }
@@ -428,6 +469,7 @@
   onpointercancel={() => {
     dragging = false;
   }}
+  onkeydown={findShortcut}
 />
 <svelte:document onselectionchange={selectionChange} />
 
@@ -486,6 +528,30 @@
         >Cancel</Button
       >
     {/if}
+    {#if !compact}
+      <input
+        type="search"
+        aria-label="Find in transcript"
+        bind:this={findFieldEl}
+        bind:value={findQuery}
+        oninput={() => {
+          findCursor = 0;
+        }}
+        disabled={!findEnabled}
+      />
+      <Button
+        size="tool"
+        variant="secondary"
+        onclick={() => stepFind(1)}
+        disabled={!findEnabled || !findHitList.length}>Next match</Button
+      >
+      <Button
+        size="tool"
+        variant="secondary"
+        onclick={() => stepFind(-1)}
+        disabled={!findEnabled || !findHitList.length}>Previous match</Button
+      >
+    {/if}
     {#if showSelectionActions && words.length && editor.hasSelection}
       <Button variant="secondary" onclick={mark}
         >{editor.selectionOverlap === "marked" ? "Unmark" : "Mark"} selection
@@ -537,6 +603,8 @@
             ></strong
           >{#each turn.indices as index (index)}<span
               data-word={index}
+              data-find-hit={findHits.has(index) ? "" : undefined}
+              aria-current={index === findCurrentIndex ? "true" : undefined}
               class:selected={editor.selectionTrackIds.includes(
                 words[index].trackId,
               ) &&
@@ -546,7 +614,8 @@
                   words[index].trackId,
                 )}
               class:marked={markedWords.has(index)}
-              class:cut={cutWords[index]}>{words[index].text}</span
+              class:cut={cutWords[index]}
+              class:find-hit={findHits.has(index)}>{words[index].text}</span
             >{" "}{/each}
         </p>
       {/each}
@@ -630,6 +699,9 @@
     text-decoration: line-through;
     text-decoration-color: var(--in-color);
     opacity: 0.6;
+  }
+  .words span.find-hit {
+    background: color-mix(in srgb, var(--amber) 35%, transparent);
   }
   .words span.selected {
     background: var(--cream);

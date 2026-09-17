@@ -6,12 +6,14 @@ import {
   alignRenders,
   combineRenders,
   frameCount,
+  layoutChannels,
   padToFrames,
   renderForExport,
+  type ExportChannelLayout,
 } from "./audio/exportMix";
-import { mixFileName, joinPath, projectStem, separateTrackFileNames } from "./exportNames";
+import { mergeFileName, joinPath, projectStem, separateTrackFileNames } from "./exportNames";
 
-export type ExportMode = "separate" | "mix" | "both" | "recording";
+export type ExportMode = "separate" | "merge" | "both" | "recording";
 
 export type ExportTrack = {
   channels: Float32Array[];
@@ -28,6 +30,7 @@ export async function runExport({
   directory,
   writeWav,
   onProgress,
+  channels = "stereo",
 }: {
   mode: ExportMode;
   tracks: ExportTrack[];
@@ -35,6 +38,7 @@ export async function runExport({
   directory: string;
   writeWav: (path: string, channels: Float32Array[], sampleRate: number) => Promise<void>;
   onProgress?: (progress: number, stage: string) => void;
+  channels?: ExportChannelLayout;
 }): Promise<{ error: string | null; written: number }> {
   if (tracks.length === 0) return { error: null, written: 0 };
   const sampleRate = tracks[0].sampleRate;
@@ -66,26 +70,26 @@ export async function runExport({
   if (mode === "recording") {
     const name = `${stem}-edited.wav`;
     onProgress?.(0.8, `Writing ${name}`);
-    await writeWav(joinPath(directory, name), renders[0], sampleRate);
+    await writeWav(joinPath(directory, name), layoutChannels(renders[0], channels), sampleRate);
     onProgress?.(1, "Export complete");
     return { error: null, written: 1 };
   }
 
-  if (mode !== "mix") {
+  if (mode !== "merge") {
     const names = separateTrackFileNames(
       stem,
       tracks.map((track) => track.speaker),
     );
     for (const [index, name] of names.entries()) {
       onProgress?.(0.5 + (0.4 * written) / tracks.length, `Writing ${name}`);
-      await writeWav(joinPath(directory, name), renders[index], sampleRate);
+      await writeWav(joinPath(directory, name), layoutChannels(renders[index], channels), sampleRate);
       written++;
     }
   }
   if (mode !== "separate") {
-    const name = mixFileName(stem);
-    onProgress?.(0.9, "Mixing and writing combined WAV");
-    await writeWav(joinPath(directory, name), combineRenders(renders), sampleRate);
+    const name = mergeFileName(stem);
+    onProgress?.(0.9, "Merging and writing combined WAV");
+    await writeWav(joinPath(directory, name), layoutChannels(combineRenders(renders), channels), sampleRate);
     written++;
   }
   onProgress?.(1, "Export complete");

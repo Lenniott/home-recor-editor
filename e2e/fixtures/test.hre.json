@@ -1,5 +1,5 @@
 {
-  "version": 2,
+  "version": 3,
   "name": "host",
   "sampleRate": 48000,
   "tracks": [
@@ -137,6 +137,10 @@
         {
           "start": 0.4966350655430712,
           "end": 1.507315074906367
+        },
+        {
+          "start": 1.639618476323829,
+          "end": 2.5248170506619148
         }
       ],
       "restored": [],
@@ -174,17 +178,47 @@
     }
   ],
   "dismissed": [],
+  "markers": [
+    {
+      "id": "m1",
+      "type": "silence",
+      "start": 0.4966350655430712,
+      "end": 1.507315074906367,
+      "laneIds": [
+        "track-2"
+      ]
+    },
+    {
+      "id": "m2",
+      "type": "cut",
+      "start": 8.84644595265827,
+      "end": 10.452441388051529,
+      "laneIds": [
+        "track-1",
+        "track-2"
+      ]
+    },
+    {
+      "id": "m4",
+      "type": "silence",
+      "start": 1.639618476323829,
+      "end": 2.5248170506619148,
+      "laneIds": [
+        "track-2"
+      ]
+    }
+  ],
   "workspace": {
-    "activeTrackId": "track-1",
+    "activeTrackId": "track-2",
     "preview": "original",
     "tab": "transcript",
     "sidebarWidth": 320,
     "sidebarOpen": true,
-    "viewStartSec": 7.950048780487802,
-    "viewDurationSec": 4,
-    "inSec": 0,
-    "outSec": 13.1773125,
-    "loop": false,
+    "viewStartSec": 4.24045051726501,
+    "viewDurationSec": 8.936861982734989,
+    "inSec": 7.84644595265827,
+    "outSec": 11.452441388051529,
+    "loop": true,
     "viewFilter": "all",
     "muteMarked": true
   }

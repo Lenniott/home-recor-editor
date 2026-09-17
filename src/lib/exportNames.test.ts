@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { joinPath, mixFileName, projectStem, sanitizeFileNamePart, separateTrackFileNames } from "./exportNames";
+import { joinPath, mergeFileName, projectStem, sanitizeFileNamePart, separateTrackFileNames } from "./exportNames";
 
 describe("sanitizeFileNamePart", () => {
   it("replaces path separators and reserved punctuation", () => {
@@ -66,9 +66,9 @@ describe("separateTrackFileNames", () => {
   });
 });
 
-describe("mixFileName", () => {
-  it("names the combined mix after the project", () => {
-    expect(mixFileName("interview")).toBe("interview-mix.wav");
+describe("mergeFileName", () => {
+  it("names the combined merge after the project", () => {
+    expect(mergeFileName("interview")).toBe("interview-merge.wav");
   });
 });
 

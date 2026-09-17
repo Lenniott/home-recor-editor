@@ -14,3 +14,5 @@ Thu 17 Sep 02:02pm: removed TDD tickets, delivery briefs, AGENTS.md, and scratch
 Thu 17 Sep 02:04pm: kept continue/TDD workflow as empty runbook; last-program tickets stay gone
 Thu 17 Sep 04:19pm: opened markers/export-session/transcript-search TDD tickets; deferred filter and save history
 Thu 17 Sep 04:34pm: unified silence and cut into one marker list; two-lane silence is one v3 record
+Thu 17 Sep 04:56pm: markers type-change and drop convert-all; export merge plus stereo default; transcript find bar
+Thu 17 Sep 05:06pm: transcript find matches multi-word phrases case-insensitively

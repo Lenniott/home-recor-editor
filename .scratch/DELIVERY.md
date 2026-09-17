@@ -18,7 +18,7 @@ Workers collide if they share a file. Orchestrator grants the lock. Fill this ta
 
 | Mutex | Typical files | Lanes that take it |
 |-------|----------------|--------------------|
-| MARKERS | `src/lib/markers.ts`, editor, projectV2, Waveform, CutLane, SelectionActions, `+page.svelte` convert-all | `markers/*` |
+| MARKERS | `src/lib/markers.ts`, editor, projectV2, Waveform, CutLane, SelectionActions, `+page.svelte` Edits type-change | `markers/*` |
 | EXPORT | exportSession, exportMix, exportNames, FileMenu, `+page.svelte` export handlers | `export-session/*` |
 | TRANSCRIPT | TranscriptPanel, transcript.ts (find / conversation display) | `transcript-search/*` |
 
@@ -34,7 +34,7 @@ Workers treat these as given. Clear the list when this program ends.
 - **Select:** Cmd/Ctrl-click; Cmd/Ctrl+A selects **all marks** (lane or list focused). Backspace/Delete or Remove. Convert-all-silences **removed** once type-change exists. Keep cut suggestions.
 - **Export audio:** File → Export dialog. Scope **all | clips**. Layout **merge | separate | both** (rename mix → merge; same equal-gain mix math). Channels **stereo** (default; mono source L=R copy) or **mono** (downmix). Clips disabled with zero export marks; module errors if invoked anyway. Nested silence/cut applied inside clip range. Names `{stem}-clip-{n}.wav`, plus speaker on separate. Skip clip with nothing left after cuts. Never overwrite. Full-timeline bounce stays.
 - **Transcript file (later ticket):** same dialog, Audio and Transcript checkboxes. `{stem}-transcript.txt`. Apply edits on/off (default on). On: drop cut/silenced words; remap clocks for **cuts** only. Clips + transcript = words overlapping export marks.
-- **Find:** literal phrase, case-insensitive, transcript highlights only.
+- **Find:** literal phrase across consecutive displayed words, case-insensitive, transcript highlights only (`transcriptFindHits`).
 - **Out of this program:** marker list filter/hidden chrome; save history / don’t clobber past saves.
 
 ## Waves

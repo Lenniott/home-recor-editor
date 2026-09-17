@@ -18,7 +18,7 @@ import {
   type ViewFilter,
 } from "./audio/timelineMap";
 import { EditHistory } from "./editHistory";
-import { MarkerList, markersFromV2, type TimelineMarker } from "./markers";
+import { MarkerList, markersFromV2, type MarkerType, type TimelineMarker } from "./markers";
 import { reconcileProjectWithDuration, type ProjectFile } from "./projectFile";
 import {
   cutSuggestions,
@@ -1253,20 +1253,10 @@ export class EditorState {
     }
   }
 
-  /** Change every per-track silence marker into a project-wide cut as one undo step. */
-  convertAllSilencesToCuts(): void {
-    const ranges = normalize(
-      this.tracks.flatMap(track => track.markedIntervals.map(range => ({start: range.start, end: range.end}))),
-      this.durationSec,
-    );
-    if (ranges.length === 0) return;
+  setType(id: string, type: MarkerType): void {
     this.commitEdit(() => {
-      this.cuts = normalize([...this.cuts, ...ranges], this.durationSec);
-      this.dismissed = subtract(this.dismissed, ranges);
-      for (const range of ranges) this.markerList.add("cut", range.start, range.end, this.tracks.map((item) => item.id));
-      this.markerList.replace(this.markerList.all().filter((marker) => marker.type !== "silence"));
+      this.markerList.setType(id, type);
       this.projectMarks();
-      this.clearSelection();
     });
   }
 

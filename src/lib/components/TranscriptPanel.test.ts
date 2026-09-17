@@ -415,3 +415,99 @@ describe("compact caption", () => {
     expect([editor.selectionStartSec, editor.selectionEndSec]).toEqual([1.6, 2.2]);
   });
 });
+
+describe("transcript find", () => {
+  function findField(): HTMLInputElement {
+    return target.querySelector<HTMLInputElement>('[aria-label="Find in transcript"]')!;
+  }
+  function typeFind(query: string): void {
+    const field = findField();
+    field.value = query;
+    field.dispatchEvent(new Event("input", { bubbles: true }));
+    flushSync();
+  }
+  beforeEach(() => {
+    editor.setTranscript(
+      [
+        { text: "Hello", start: 1, end: 1.5 },
+        { text: "there", start: 1.6, end: 2.2 },
+        { text: "hello", start: 4, end: 4.4 },
+      ],
+      "complete",
+    );
+    flushSync();
+  });
+
+  it("highlights every case-insensitive phrase match", () => {
+    typeFind("hello");
+    expect(target.querySelectorAll("[data-find-hit]")).toHaveLength(2);
+  });
+
+  it("highlights a multi-word phrase ignoring case", () => {
+    editor.setTranscript(
+      [
+        { text: "This", start: 1, end: 1.2 },
+        { text: "is", start: 1.3, end: 1.4 },
+        { text: "Analyrical", start: 1.5, end: 2 },
+        { text: "here", start: 2.1, end: 2.4 },
+      ],
+      "complete",
+    );
+    flushSync();
+    typeFind("this is Analyrical");
+    const hits = [...target.querySelectorAll("[data-find-hit]")].map((el) =>
+      el.textContent,
+    );
+    expect(hits).toEqual(["This", "is", "Analyrical"]);
+  });
+
+  it("next and previous wrap aria-current among hits", () => {
+    typeFind("hello");
+    const hits = () => [...target.querySelectorAll("[data-find-hit]")];
+    expect(hits().map((hit) => hit.getAttribute("aria-current"))).toEqual(["true", null]);
+    button("Next match").click();
+    flushSync();
+    expect(hits().map((hit) => hit.getAttribute("aria-current"))).toEqual([null, "true"]);
+    button("Next match").click();
+    flushSync();
+    expect(hits().map((hit) => hit.getAttribute("aria-current"))).toEqual(["true", null]);
+    button("Previous match").click();
+    flushSync();
+    expect(hits().map((hit) => hit.getAttribute("aria-current"))).toEqual([null, "true"]);
+  });
+
+  it("clears highlights when the query is empty", () => {
+    typeFind("hello");
+    expect(target.querySelectorAll("[data-find-hit]")).toHaveLength(2);
+    typeFind("");
+    expect(target.querySelectorAll("[data-find-hit]")).toHaveLength(0);
+  });
+
+  it("disables find when the transcript is missing", () => {
+    editor.setTranscript([], "missing");
+    flushSync();
+    expect(findField().disabled).toBe(true);
+  });
+
+  it("focuses the find field on Cmd or Ctrl+F", () => {
+    window.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "f", metaKey: true, bubbles: true }),
+    );
+    flushSync();
+    expect(document.activeElement).toBe(findField());
+    findField().blur();
+    window.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "f", ctrlKey: true, bubbles: true }),
+    );
+    flushSync();
+    expect(document.activeElement).toBe(findField());
+  });
+
+  it("clicking a hit selects that audio and seeks like a word click", () => {
+    typeFind("hello");
+    pointer(target.querySelectorAll("[data-find-hit]")[1]!);
+    expect([editor.selectionStartSec, editor.selectionEndSec]).toEqual([4, 4.4]);
+    expect(editor.playheadSec).toBe(4);
+    expect(player.seek).toHaveBeenCalledWith(4);
+  });
+});

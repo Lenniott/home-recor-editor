@@ -1,5 +1,5 @@
 <script module lang="ts">
-  export type ExportChoice = "recording" | "separate" | "mix" | "both";
+  export type ExportChoice = "recording" | "separate" | "merge" | "both";
 </script>
 
 <script lang="ts">
@@ -167,7 +167,7 @@
       <p class="wait">Choose a save location…</p>
     {:else if twoTrack}
       <Button variant="primary" onclick={() => chooseExport("separate")}>Separate tracks</Button>
-      <Button variant="primary" onclick={() => chooseExport("mix")}>Combined mix</Button>
+      <Button variant="primary" onclick={() => chooseExport("merge")}>Combined merge</Button>
       <Button variant="primary" onclick={() => chooseExport("both")}>Both</Button>
     {:else}
       <Button variant="primary" onclick={() => chooseExport("recording")}>Export edited recording</Button>

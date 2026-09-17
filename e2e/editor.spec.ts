@@ -134,7 +134,7 @@ test("single-view layout keeps a compact tweak strip", async ({ page }) => {
   await expect(page.getByRole("slider", { name: "Waveform vertical zoom" })).toHaveCount(0);
 });
 
-test("cleanup mode, deep dB scale, bulk conversion, and simplified transport", async ({ page }) => {
+test("cleanup mode, deep dB scale, type change, and simplified transport", async ({ page }) => {
   await seed(page);
   await expect(page.getByText("Loop IN–OUT")).toHaveCount(0);
   await expect(page.getByRole("button", { name: "IN", exact: true })).toHaveCount(0);
@@ -166,7 +166,9 @@ test("cleanup mode, deep dB scale, bulk conversion, and simplified transport", a
   await page.mouse.up();
   await page.getByRole("button", { name: "Mark", exact: true }).click();
   await page.getByRole("button", { name: "edits", exact: true }).click();
-  await page.getByRole("button", { name: "Convert all silences to shared cuts" }).click();
+  await expect(page.getByRole("button", { name: "Convert all silences to shared cuts" })).toHaveCount(0);
+  await page.getByRole("button", { name: "Change to cut" }).first().click();
+  await page.getByRole("button", { name: "Change to cut" }).click();
   await expect(page.locator(".mark.cut")).toHaveCount(1);
 });
 
@@ -193,13 +195,13 @@ test("save then open restores a silence mark in the timeline", async ({ page }) 
   await expect(page.locator(".mark.cut")).toHaveCount(0);
 });
 
-test("export mix writes a stereo wav to the virtual folder", async ({ page }) => {
+test("export merge writes a stereo wav to the virtual folder", async ({ page }) => {
   await seed(page);
   await fileMenu(page, "Export");
   await setPicks(page, { pickDirectory: "/virtual/out" });
-  await page.getByRole("button", { name: "Combined mix" }).click();
+  await page.getByRole("button", { name: "Combined merge" }).click();
   await expect(page.getByText("Exported")).toBeVisible({ timeout: 30000 });
-  const bytes = await virtualBytes(page, "/virtual/out/Alex-mix.wav");
+  const bytes = await virtualBytes(page, "/virtual/out/Alex-merge.wav");
   expect(bytes).not.toBeNull();
   const channels = new DataView(new Uint8Array(bytes!).buffer).getUint16(22, true);
   expect(channels).toBe(2);

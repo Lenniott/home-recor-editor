@@ -18,26 +18,38 @@ Read this file when the user says **continue**, **delivery**, **TDD**, or **arch
 
 | Item | State |
 |------|--------|
-| Branch | current |
-| Latest | markers 01: unified silence/cut list; v3 save; two-lane silence is one mark |
-| Frontier | markers 02, export-session 01, transcript-search 01 |
+| Branch | `tdd/program` |
+| Latest | markers 02 type-change; export-session 01 merge+stereo; transcript find (literal phrase, case-insensitive, multi-word) |
+| Frontier | markers 03 |
 
 ## Next
 
-- `.scratch/markers/issues/02-type-change-drop-convert-all.md` — mutex MARKERS
-- `.scratch/export-session/issues/01-merge-and-stereo-layout.md` — mutex EXPORT
-- `.scratch/transcript-search/issues/01-find-phrase.md` — mutex TRANSCRIPT
+- `.scratch/markers/issues/03-select-list-remove.md` — mutex MARKERS — **Blocked by 02: done**
+
+Do not start export-session 02: it is blocked by markers 04. Transcript-search has no further tickets.
 
 ## Where to look
 
-Do not scan the repo first. Ticket → `.scratch/WORKER.md` → that area’s `TDD.md` `## NN` → locked decisions in `.scratch/DELIVERY.md`.
+Do not scan the repo first.
 
-**Landed (markers 01, verified in the Tauri app):** `src/lib/markers.ts` is the list (`add` / `resize` / `subtract` / `replace` / `all`). No `setType` yet. `EditorState.markerList` is source of truth; `projectMarks()` writes per-lane `rawMarkers` and `cuts`. `src/lib/projectV2.ts` opens v2 as one-lane silences + all-lane cuts and saves v3 `markers`. Tests: `src/lib/markers.test.ts`, Mark/undo/save in `src/lib/editor.svelte.test.ts`.
+1. `.scratch/markers/issues/03-select-list-remove.md`
+2. `.scratch/WORKER.md`
+3. `.scratch/markers/TDD.md` `## 03`
+4. Locked **Select** bullet in `.scratch/DELIVERY.md`
 
-**Next code (not a tour):**
-- MARKERS 02: `MarkerList` + `convertAllSilencesToCuts` in `src/lib/editor.svelte.ts`; button in `src/routes/+page.svelte`; e2e name in `e2e/editor.spec.ts`; README convert-all bullet
-- EXPORT 01: `src/lib/exportSession.ts`, `src/lib/audio/exportMix.ts`, `src/lib/exportNames.ts`, `src/lib/components/FileMenu.svelte`
-- TRANSCRIPT 01: `src/lib/components/TranscriptPanel.svelte`, `src/lib/transcript.ts` — skip if a MARKERS worker has those tests
+**First red (name must match):** `it("removing the selected marks is one undo step")`  
+Known: two silence marks; select both ids; remove; `all()` `[]`; undo restores both ids.  
+**Prove red:** `npm test -- src/lib/editor.svelte.test.ts`
+
+**Code to open (not a tour):**
+- `src/lib/editor.svelte.ts` — `markerList` is source of truth; `setType(id, type)` exists; **no selected-mark ids yet**
+- `src/lib/markers.ts` — `add` / `resize` / `subtract` / `replace` / `setType` / `all`; **no select API**
+- `src/routes/+page.svelte` Edits pane — type change is **one row at a time** (`Change to cut` / `Change to silence`); 03 must make type change apply to a multi-selection
+- Tests: `src/lib/editor.svelte.test.ts`, `src/lib/markers.test.ts`
+
+**Leave alone:** `TranscriptPanel` find (`transcriptFindHits` in `src/lib/transcript.ts`); export `merge` / stereo in `exportSession.ts` / `FileMenu.svelte`; export mark **type** (04).
+
+**After 03:** `.scratch/markers/issues/04-export-mark-type.md` (Mark action `export`; overlapping export marks stay two records). Then `.scratch/export-session/issues/02-clips-scope.md`.
 
 ## Pointers
 

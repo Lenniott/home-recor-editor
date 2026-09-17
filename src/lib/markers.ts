@@ -73,6 +73,14 @@ export class MarkerList {
     else marker.end = Math.max(time, marker.start);
   }
 
+  setType(id: string, type: MarkerType): void {
+    const marker = this.items.find((item) => item.id === id);
+    if (!marker) return;
+    marker.type = type;
+    if (type === "cut") marker.laneIds = [...this.trackIds];
+    this.mergeOverlapping();
+  }
+
   mergeOverlapping(): void {
     const source = this.items;
     this.items = [];

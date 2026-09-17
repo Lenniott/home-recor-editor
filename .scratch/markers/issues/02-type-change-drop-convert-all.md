@@ -4,16 +4,16 @@
 
 **Blocked by:** 01: Unified silence and cut marks
 
-**Status:** ready-for-agent
+**Status:** done
 
 **Mutex:** MARKERS
 
-- [ ] Silence on one lane → cut expands to all tracks
-- [ ] Cut → silence stays on all tracks (synced mute)
-- [ ] Overlapping silences set to cut become one cut
-- [ ] Convert-all control and README bullet are gone
-- [ ] Type change undoes in one step
-- [ ] LOG.md one line via log-work script
+- [x] Silence on one lane → cut expands to all tracks
+- [x] Cut → silence stays on all tracks (synced mute)
+- [x] Overlapping silences set to cut become one cut
+- [x] Convert-all control and README bullet are gone
+- [x] Type change undoes in one step
+- [x] LOG.md one line via log-work script
 
 ---
 

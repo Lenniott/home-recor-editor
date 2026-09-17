@@ -4,16 +4,16 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** done
 
 **Mutex:** EXPORT
 
-- [ ] `merge` writes `{stem}-merge.wav`; tests and menu use merge not mix
-- [ ] Default stereo: one-channel source → two channels, L equals R
-- [ ] Mono option → one channel
-- [ ] Sample-rate mismatch still refuses before any write
-- [ ] README export bullets match
-- [ ] LOG.md one line via log-work script
+- [x] `merge` writes `{stem}-merge.wav`; tests and menu use merge not mix
+- [x] Default stereo: one-channel source → two channels, L equals R
+- [x] Mono option → one channel
+- [x] Sample-rate mismatch still refuses before any write
+- [x] README export bullets match
+- [x] LOG.md one line via log-work script
 
 ---
 

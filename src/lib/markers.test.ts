@@ -59,4 +59,46 @@ describe("MarkerList", () => {
       expect.objectContaining({ type: "cut", start: 3, end: 4, laneIds: ["a", "b"] }),
     ]);
   });
+
+  it("setType silence to cut expands laneIds to every track", () => {
+    const list = new MarkerList(["a", "b"]);
+    list.add("silence", 1, 2, ["a"]);
+    list.setType(list.all()[0].id, "cut");
+    expect(list.all()).toHaveLength(1);
+    expect(list.all()[0]).toMatchObject({
+      type: "cut",
+      start: 1,
+      end: 2,
+      laneIds: ["a", "b"],
+    });
+  });
+
+  it("setType cut to silence keeps all lanes", () => {
+    const list = new MarkerList(["a", "b"]);
+    list.add("cut", 1, 2, ["a"]);
+    list.setType(list.all()[0].id, "silence");
+    expect(list.all()).toHaveLength(1);
+    expect(list.all()[0]).toMatchObject({
+      type: "silence",
+      start: 1,
+      end: 2,
+      laneIds: ["a", "b"],
+    });
+  });
+
+  it("overlapping silences set to cut merge into one cut", () => {
+    const list = new MarkerList(["a", "b"]);
+    list.add("silence", 1, 3, ["a"]);
+    list.add("silence", 2, 4, ["b"]);
+    const [first, second] = list.all();
+    list.setType(first.id, "cut");
+    list.setType(second.id, "cut");
+    expect(list.all()).toHaveLength(1);
+    expect(list.all()[0]).toMatchObject({
+      type: "cut",
+      start: 1,
+      end: 4,
+      laneIds: ["a", "b"],
+    });
+  });
 });

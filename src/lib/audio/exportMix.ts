@@ -102,3 +102,21 @@ export function combineRenders(renders: Float32Array[][]): Float32Array[] {
     for (let i = 0; i < channel.length; i++) channel[i] = Math.max(-1, Math.min(1, channel[i]));
   return mix;
 }
+
+/** Stereo layout: one-channel audio is copied onto both L and R. */
+export function toStereo(channels: Float32Array[]): Float32Array[] {
+  if (channels.length >= 2) return channels;
+  const left = channels[0] ?? new Float32Array(0);
+  return [left, left.slice()];
+}
+
+export type ExportChannelLayout = "stereo" | "mono";
+
+/** Stereo by default; `mono` averages channels down to one. */
+export function layoutChannels(
+  channels: Float32Array[],
+  layout: ExportChannelLayout = "stereo",
+): Float32Array[] {
+  if (layout === "mono") return [downmixToMono(channels)];
+  return toStereo(channels);
+}

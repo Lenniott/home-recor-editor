@@ -469,7 +469,7 @@
   });
 
   /** What one two-track Export action writes: one WAV per track, one combined mix, or both. */
-  type ExportMode = "separate" | "mix" | "both";
+  type ExportMode = "separate" | "merge" | "both";
 
   function trackChannels(buffer: AudioBuffer): Float32Array[] {
     return Array.from({ length: buffer.numberOfChannels }, (_, i) =>
@@ -850,26 +850,8 @@
     <div class="pane-content" hidden={tab !== "edits"}>
       <h2>Review shared cuts</h2>
       <p class="pane-hint">
-        Cut markers affect every track. Preview edits to hear the result; Export
-        applies them to new files.
-      </p>
-      <Button
-        class="bulk-convert"
-        variant="primary"
-        disabled={!editor.tracks.some(
-          (track) => track.markedIntervals.length > 0,
-        )}
-        onclick={() => {
-          editor.convertAllSilencesToCuts();
-          player.refreshIfPlaying();
-        }}
-        tooltip
-        title="Every per-track silence marker becomes a shared cut across all tracks"
-        >Convert all silences to shared cuts</Button
-      >
-      <p class="pane-hint compact">
-        This clears the silence markers and places their combined ranges in the
-        shared cut lane. Undo restores them.
+        Cut markers affect every track. Change a silence to a cut to cover all
+        tracks; undo restores the previous type.
       </p>
       <CutLane reviewOnly />
       <h2>Marked cuts · {editor.cuts.length}</h2>
@@ -882,6 +864,22 @@
             size="tool"
             variant="secondary"
             onclick={() => {
+              const mark = editor.markerList
+                .all()
+                .find(
+                  (item) =>
+                    item.type === "cut" &&
+                    item.start === cut.start &&
+                    item.end === cut.end,
+                );
+              if (mark) editor.setType(mark.id, "silence");
+              player.refreshIfPlaying();
+            }}>Change to silence</Button
+          >
+          <Button
+            size="tool"
+            variant="secondary"
+            onclick={() => {
               editor.restoreCut(cut);
               player.refreshIfPlaying();
             }}>Unmark</Button
@@ -889,8 +887,8 @@
         </div>
       {/each}
       {#each editor.tracks as track (track.id)}
-        <h2>{track.speaker} · {track.markedIntervals.length} silences</h2>
-        {#each track.markedIntervals as range (`${track.id}-${range.start}-${range.end}`)}
+        <h2>{track.speaker} · {track.rawMarkers.length} silences</h2>
+        {#each track.rawMarkers as range (`${track.id}-${range.start}-${range.end}`)}
           <div class="edit-row">
             <Button
               size="tool"
@@ -899,6 +897,23 @@
                 editor.setActiveTrack(track.id);
                 player.audition(range);
               }}>{range.start.toFixed(1)} – {range.end.toFixed(1)} s</Button
+            >
+            <Button
+              size="tool"
+              variant="secondary"
+              onclick={() => {
+                const mark = editor.markerList
+                  .all()
+                  .find(
+                    (item) =>
+                      item.type === "silence" &&
+                      item.start === range.start &&
+                      item.end === range.end &&
+                      item.laneIds.includes(track.id),
+                  );
+                if (mark) editor.setType(mark.id, "cut");
+                player.refreshIfPlaying();
+              }}>Change to cut</Button
             >
             <Button
               size="tool"
@@ -1031,21 +1046,11 @@
     margin-bottom: 1.5rem;
   }
 
-  .pane-hint.compact {
-    margin-bottom: 1rem;
-    line-height: 1.4;
-  }
-
   .edit-row {
     display: flex;
     justify-content: space-between;
     gap: 0.5rem;
     margin-bottom: 0.4rem;
-  }
-
-  .pane-content :global(.bulk-convert) {
-    width: 100%;
-    margin-bottom: 0.5rem;
   }
 
   .error {

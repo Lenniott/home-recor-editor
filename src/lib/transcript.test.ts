@@ -9,6 +9,7 @@ import {
   selectedWordRange,
   visualWordRange,
   wordsAtOffsets,
+  transcriptFindHits,
 } from "./transcript";
 
 const words = [
@@ -115,5 +116,13 @@ describe("conversation paragraphs", () => {
     expect(formatTranscriptClock(0.59)).toBe("00:01");
     expect(formatParagraphClock(0.59, 5.8)).toBe("00:01–00:06");
     expect(formatParagraphClock(0.8, 1.2)).toBe("00:01");
+  });
+});
+
+describe("transcript find hits", () => {
+  it("matches a mixed-case phrase across consecutive words", () => {
+    expect(
+      transcriptFindHits(["This", "is", "Analyrical", "here"], "this is Analyrical"),
+    ).toEqual([0, 1, 2]);
   });
 });

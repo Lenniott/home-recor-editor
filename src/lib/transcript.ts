@@ -145,3 +145,27 @@ export function wordsAtOffsets(words: TextWord[], anchor: number, focus: number)
   while (last + 1 < words.length && words[last + 1].from < end) last++;
   return [first, last];
 }
+
+/** Word indices whose joined text contains `query` as a literal, case-insensitive phrase. */
+export function transcriptFindHits(texts: string[], query: string): number[] {
+  const needle = query.trim().replace(/\s+/g, " ").toLowerCase();
+  if (!needle) return [];
+  const parts = texts.map((text) => text.toLowerCase());
+  const haystack = parts.join(" ");
+  const hits = new Set<number>();
+  let from = 0;
+  while (from < haystack.length) {
+    const at = haystack.indexOf(needle, from);
+    if (at < 0) break;
+    const end = at + needle.length;
+    let pos = 0;
+    for (let i = 0; i < parts.length; i++) {
+      if (i > 0) pos += 1;
+      const start = pos;
+      pos += parts[i].length;
+      if (start < end && pos > at) hits.add(i);
+    }
+    from = at + 1;
+  }
+  return [...hits].sort((a, b) => a - b);
+}

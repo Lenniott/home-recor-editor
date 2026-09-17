@@ -4,17 +4,17 @@
 
 **Blocked by:** None (can start immediately). Orchestrator: do not run while MARKERS holds `TranscriptPanel` / `TranscriptPanel.test.ts`.
 
-**Status:** ready-for-agent
+**Status:** done
 
 **Mutex:** TRANSCRIPT
 
-- [ ] Query `hello` highlights both `Hello` and `hello` in a known fixture
-- [ ] Next/prev wrap
-- [ ] Empty query clears highlights
-- [ ] Disabled when transcript missing
-- [ ] Click hit = existing select + seek
-- [ ] README find in Edit by text
-- [ ] LOG.md one line via log-work script
+- [x] Query `hello` highlights both `Hello` and `hello` in a known fixture
+- [x] Next/prev wrap
+- [x] Empty query clears highlights
+- [x] Disabled when transcript missing
+- [x] Click hit = existing select + seek
+- [x] README find in Edit by text
+- [x] LOG.md one line via log-work script
 
 ---
 

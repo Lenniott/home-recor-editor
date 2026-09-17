@@ -65,9 +65,9 @@ export function separateTrackFileNames(stem: string, speakers: string[]): string
   });
 }
 
-/** The combined mix's file name. */
-export function mixFileName(stem: string): string {
-  return `${stem}-mix.wav`;
+/** The combined merge's file name. */
+export function mergeFileName(stem: string): string {
+  return `${stem}-merge.wav`;
 }
 
 /**

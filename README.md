@@ -26,7 +26,7 @@ npm run tauri -- build --bundles app
 1. Open a recording, add the second synced speaker track if needed, and use the **Transcript** tab in the left pane.
 2. Click **Download English model · 142 MB** once. The app downloads `base.en` over HTTPS, verifies its pinned checksum, and caches it under the app's cache directory. Cancelled or failed downloads are discarded.
 3. Click **Transcribe all tracks**. Both recordings are processed sequentially and merged into one speaker-labelled conversation. VAD first identifies speech; only padded speech windows are converted to 16 kHz mono and sent to Whisper. Returned timestamps are mapped back to the original recording. No-speech recordings skip Whisper entirely. This reduces silence-driven hallucinations but cannot guarantee transcription accuracy. After model setup, no network connection is needed and no audio is uploaded.
-4. Click a word to select its audio and move the playhead to its start. The current word highlights as playback moves. Drag across text to update the audio selection immediately; click transcript whitespace to clear it. With the transcript focused, use arrow keys to move by word, Shift to extend, and Home/End to reach the first/last word.
+4. Click a word to select its audio and move the playhead to its start. The current word highlights as playback moves. Drag across text to update the audio selection immediately; click transcript whitespace to clear it. With the transcript focused, use arrow keys to move by word, Shift to extend, and Home/End to reach the first/last word. **Find** (Cmd/Ctrl+F) searches a literal phrase, case-insensitive; matches highlight in the transcript, Next/Previous wrap, and clicking a hit selects and seeks like a word click. Find is disabled until a complete transcript exists; the query is not saved in the project.
 5. Choose **Silence selected tracks** or **Cut both tracks** in the fixed action picker, then use **Mark**, **Unmark**, or **M**. Escape clears selection; existing undo/redo and waveform controls continue to work.
 
 Word timestamps are approximate. Audition the range and adjust its edges in the waveform when needed. Marks follow the editor's existing edge-buffer settings. Selecting text shows the full timeline so hidden audio can be selected too.
@@ -48,11 +48,10 @@ Agents pick up queued work from `.scratch/CONTINUE.md` when asked to continue.
 - Cleanup can run **VAD + silence floor** or the **silence floor only** across all tracks. Settings belong to the active speaker. Audio below the quiet floor is included even if it contains quiet speech. Scroll over a lane's dB ruler to amplify quiet detail down to −60 dB; scroll back out or double-click to restore the normal 0/−6/−12 view. The selected floor is drawn across each lane.
 - **Silence gap** controls the minimum detected pause and the pause between transcript paragraphs. Speaker changes also start a new paragraph.
 - **Cmd/Ctrl + +/−** zooms the shared timeline using the same zoom calculation as scrolling.
-- **Edits** reviews overlap suggestions and existing markers. Audition includes one second of context on either side.
-- **Convert all silences to shared cuts** changes every per-track silence marker into a project-wide cut in one undoable operation.
+- **Edits** reviews overlap suggestions and existing markers. Audition includes one second of context on either side. **Change to cut** on a silence expands it to every track (then overlapping cuts merge); **Change to silence** keeps all lanes as a synced mute. Each type change is one undo step.
 - **Original** plays the sources; **Preview edits** auditions all silence and cut markers. Only **Export** renders those edits into new audio files.
 - Export shows its render, mix, encode, and file-writing progress in the export dialog after you choose what to write.
-- Separate WAVs keep their channel layouts and share one rate and duration. The combined mix is stereo, with each track at half gain and mono sources centred.
+- Separate WAVs share one rate and duration. **Combined merge** writes `{stem}-merge.wav` (equal-gain sum, same math as the old mix). Written files are stereo by default (a one-channel source is copied to L and R). Pass `channels: "mono"` to downmix to one channel. Sample-rate mismatch still refuses before any write.
 
 ## Verification
 
