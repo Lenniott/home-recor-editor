@@ -4,7 +4,7 @@
 
 **Blocked by:** 01: Completed transcripts write through one session method
 
-**Status:** ready-for-agent
+**Status:** done
 
 - [ ] Transcribe then Undo does not leave a dirty project with an empty history (one consistent outcome)
 - [ ] Save and reload still restore words

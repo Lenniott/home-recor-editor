@@ -4,11 +4,11 @@
 
 **Blocked by:** export-session 01: Edited render matches preview at silence and cut boundaries
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] `npm test` covers preview/export sample parity and VAD on the speech fixture
-- [ ] Playwright no longer hosts those two logic tests
-- [ ] README Verification list matches what e2e actually automates
+- [x] `npm test` covers preview/export sample parity and VAD on the speech fixture
+- [x] Playwright no longer hosts those two logic tests
+- [x] README Verification list matches what e2e actually automates
 
 ---
 

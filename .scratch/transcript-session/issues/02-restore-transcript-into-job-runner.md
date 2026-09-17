@@ -4,12 +4,12 @@
 
 **Blocked by:** 01: Completed transcripts write through one session method
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] Project load with saved words does not show “transcribe again” empty-state
-- [ ] Lane switch updates runner status for that speaker’s audio
-- [ ] Restoring the same payload is a no-op on the runner
-- [ ] Token bump with the pane unmounted does not corrupt track data
+- [x] Project load with saved words does not show “transcribe again” empty-state
+- [x] Lane switch updates runner status for that speaker’s audio
+- [x] Restoring the same payload is a no-op on the runner
+- [x] Token bump with the pane unmounted does not corrupt track data
 
 ---
 

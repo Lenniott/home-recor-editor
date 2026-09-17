@@ -4,7 +4,7 @@
 
 **Blocked by:** 01: Edited render matches preview at silence and cut boundaries
 
-**Status:** ready-for-agent
+**Status:** done
 
 - [ ] Single-track Export edited recording still writes one WAV with existing naming
 - [ ] Two-track Separate / Mix / Both still write the same set of files

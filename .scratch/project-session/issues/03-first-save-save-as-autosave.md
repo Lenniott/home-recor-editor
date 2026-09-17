@@ -4,7 +4,7 @@
 
 **Blocked by:** 01: Import one recording and restore marks from a companion project
 
-**Status:** ready-for-agent
+**Status:** done
 
 - [ ] Fresh import with no companion stays unsaved; autosave does not fire
 - [ ] After first Save, an edit autosaves once after the debounce

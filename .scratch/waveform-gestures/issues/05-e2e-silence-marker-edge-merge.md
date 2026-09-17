@@ -4,11 +4,11 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] Flow is distinct from cut-handle drag
-- [ ] Marker count does not jump mid-drag (merge only on release)
-- [ ] Runs on a two-track seeded (or imported) project like the other editor e2e
+- [x] Flow is distinct from cut-handle drag
+- [x] Marker count does not jump mid-drag (merge only on release)
+- [x] Runs on a two-track seeded (or imported) project like the other editor e2e
 
 ---
 

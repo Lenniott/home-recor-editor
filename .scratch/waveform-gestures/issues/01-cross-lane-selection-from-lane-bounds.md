@@ -4,11 +4,11 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] Unit tests: top-to-bottom, bottom-to-top, Y outside lanes, one lane, three lanes
-- [ ] Cross-lane drag still enables Mark
-- [ ] Pointer-move path does not query the document for track lanes
+- [x] Unit tests: top-to-bottom, bottom-to-top, Y outside lanes, one lane, three lanes
+- [x] Cross-lane drag still enables Mark
+- [x] Pointer-move path does not query the document for track lanes
 
 ---
 

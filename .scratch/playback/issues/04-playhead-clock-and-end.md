@@ -4,12 +4,12 @@
 
 **Blocked by:** 03: Play, pause, and seek against a fake audio context
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] Advancing fake time moves playhead across a cut in source time, not raw elapsed
-- [ ] Playhead ticks are not undoable
-- [ ] Elapsed past plan length stops playback
-- [ ] Stale ended-callback from a previous play does not stop a newer play
+- [x] Advancing fake time moves playhead across a cut in source time, not raw elapsed
+- [x] Playhead ticks are not undoable
+- [x] Elapsed past plan length stops playback
+- [x] Stale ended-callback from a previous play does not stop a newer play
 
 ---
 

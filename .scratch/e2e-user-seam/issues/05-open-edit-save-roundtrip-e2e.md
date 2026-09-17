@@ -4,11 +4,11 @@
 
 **Blocked by:** 02: E2e session starts from Import recordings, not an injected editor; project-session 03: First Save, Save As, and autosave status; project-session 04: Open a saved project when recordings have moved
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] Round-trip uses File menu / Open Project, not evaluate seeding
-- [ ] After reload, marks and transcript are visible in chrome
-- [ ] Virtual filesystem contains the updated project JSON
+- [x] Round-trip uses File menu / Open Project, not evaluate seeding
+- [x] After reload, marks and transcript are visible in chrome
+- [x] Virtual filesystem contains the updated project JSON
 
 ---
 

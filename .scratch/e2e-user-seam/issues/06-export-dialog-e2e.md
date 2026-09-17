@@ -4,11 +4,11 @@
 
 **Blocked by:** 02: E2e session starts from Import recordings, not an injected editor; export-session 03: Export session owns staging; the page only picks a destination
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] At least one two-track mode (mix or separate) completes from the dialog
-- [ ] Spec does not import render helpers inside the browser
-- [ ] README no longer implies export is untested; native sheets remain out of scope
+- [x] At least one two-track mode (mix or separate) completes from the dialog
+- [x] Spec does not import render helpers inside the browser
+- [x] README no longer implies export is untested; native sheets remain out of scope
 
 ---
 

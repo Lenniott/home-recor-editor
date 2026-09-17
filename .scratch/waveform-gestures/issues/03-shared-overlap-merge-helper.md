@@ -4,7 +4,7 @@
 
 **Blocked by:** 02: Pointer-up after a select drag has one documented finish policy
 
-**Status:** ready-for-agent
+**Status:** done
 
 - [ ] Existing marker-drag merge behavior is preserved
 - [ ] Merge does not run on pointer-move, only on finish

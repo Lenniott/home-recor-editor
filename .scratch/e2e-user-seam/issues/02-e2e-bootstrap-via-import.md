@@ -4,11 +4,11 @@
 
 **Blocked by:** 01: Playwright drives a fake desktop adapter instead of a shallow invoke stub
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] Two lanes and transcript words appear from chrome after setup
-- [ ] Spec contains no dynamic import of the session module
-- [ ] Existing gesture and layout tests still pass after the new setup
+- [x] Two lanes and transcript words appear from chrome after setup
+- [x] Spec contains no dynamic import of the session module
+- [x] Existing gesture and layout tests still pass after the new setup
 
 ---
 

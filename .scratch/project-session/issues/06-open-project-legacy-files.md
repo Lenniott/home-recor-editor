@@ -4,7 +4,7 @@
 
 **Blocked by:** 05: Upgrade a legacy companion project on next save
 
-**Status:** ready-for-agent
+**Status:** done
 
 - [ ] Current-format files still open with relink
 - [ ] Old-format file via Open Project: either migrates on open, or one actionable message pointing at import

@@ -4,7 +4,7 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** done
 
 - [ ] One documented pointer-up behavior for a finished select drag
 - [ ] Unit tests lock overlap above vs below the merge fraction if auto-merge ships; otherwise they lock pending-only

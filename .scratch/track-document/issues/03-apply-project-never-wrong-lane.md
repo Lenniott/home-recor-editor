@@ -4,7 +4,7 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** done
 
 - [ ] Two saved tracks vs one loaded lane: no silent wrong-lane marks
 - [ ] Chosen fail-safe or partial-apply rule is locked by a test

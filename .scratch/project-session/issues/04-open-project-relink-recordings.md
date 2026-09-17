@@ -4,7 +4,7 @@
 
 **Blocked by:** 01: Import one recording and restore marks from a companion project
 
-**Status:** ready-for-agent
+**Status:** done
 
 - [ ] All sources present → two-track session restored with marks and transcripts
 - [ ] Cancel on Locate → prior session unchanged, no spurious error

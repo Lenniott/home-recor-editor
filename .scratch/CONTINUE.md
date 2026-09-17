@@ -15,24 +15,26 @@ Read this file when the user says **continue**, **delivery**, **TDD tickets**, o
 7. Commit code + this handoff together. Do not ask the user to update docs for the next agent; that is this step. Push only if they asked.
 8. End the user message with **Manual test** (see `DELIVERY.md`).
 
-## Status (2026-09-15)
+## Status (2026-09-17)
 
 | Item | State |
 |------|--------|
-| Branch | `tdd/program` |
-| Latest | playback 02: `new AudioPlayer(session)` is the seam; `player.test.ts` proves a fresh editor’s playhead is independent of the module singleton. `export const player` stays as the app adapter. Shared `AudioContext` is `getContext()` identity, not scheduling (03). |
+| Branch | `tdd/program` (uncommitted; do not commit unless asked) |
+| Latest | Remaining Wave 2–4 leftovers closed: playback 03–05, transcript 02, vad 03, e2e 01–06, waveform 05, whisper 03. Whisper 04 skip-script landed; live sidecar smoke is optional/external. |
 | Wave 0 | **done** |
-| Wave 1 | in progress (PAGE free, EDITOR free, PLAYER free) |
-| Frontier | Wave 1 remainder |
+| Wave 1 | **done** |
+| Wave 2 | **done** |
+| Wave 3 | **done** |
+| Wave 4 | **done** (whisper 04 optional smoke needs `WHISPER_SMOKE=1` + engine binary) |
+| Frontier | none — Next is empty |
 
-## Next (Wave 1)
+Verified this session: `npm test` (350), `npm run check` (0 errors), `cargo test --manifest-path src-tauri/Cargo.toml` (14), `npm run test:e2e` (10 passed, Chromium). `npm run test:whisper-smoke` skips unless `WHISPER_SMOKE=1`.
 
-| Ticket | Mutex | Blocked by |
-|--------|-------|------------|
-| waveform 01 | WAVEFORM | none |
-| whisper 01 | RUST_WHISPER | whisper 02 **done** |
+## Next
 
-Wave 2 (`project-session` 03–05, PAGE, base = 01; `playback` 03 after 02) in `DELIVERY.md`.
+_(empty)_
+
+Blockers: whisper 04 live smoke only — needs the sidecar under `src-tauri/binaries` and `WHISPER_SMOKE=1`. Not required for default `npm test`.
 
 ## Product facts the next slice must keep
 

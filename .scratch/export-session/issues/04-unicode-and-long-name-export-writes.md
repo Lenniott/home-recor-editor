@@ -4,7 +4,7 @@
 
 **Blocked by:** 03: Export session owns staging; the page only picks a destination
 
-**Status:** ready-for-agent
+**Status:** done
 
 - [ ] Written file exists and is a valid WAV
 - [ ] Decoded destination matches the original path

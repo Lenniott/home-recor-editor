@@ -4,10 +4,10 @@
 
 **Blocked by:** 01: Shared Silero threshold helper for cleanup and transcription
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] Mocked detect: one invocation each, options deep-equal
-- [ ] Includes negativeSpeechThreshold derived from the helper
+- [x] Mocked detect: one invocation each, options deep-equal
+- [x] Includes negativeSpeechThreshold derived from the helper
 
 ---
 

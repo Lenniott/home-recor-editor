@@ -4,7 +4,7 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** done
 
 - [ ] Track A succeeds, B errors → A kept; remaining tracks still run
 - [ ] Cancel → no further transcribe calls; queue empty

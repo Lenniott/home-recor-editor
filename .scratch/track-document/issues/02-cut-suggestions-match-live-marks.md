@@ -4,7 +4,7 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** done
 
 - [ ] Two-track overlap matches the session’s suggestion list
 - [ ] Shorter-track tail matches existing algebra tests

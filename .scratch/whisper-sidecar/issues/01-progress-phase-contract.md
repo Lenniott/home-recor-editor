@@ -4,11 +4,11 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] Canonical phases: downloading, verifying, detecting, transcribing, transcribing-cpu, complete, error, cancelled
-- [ ] Frontend ignores unknown phases without dropping the job
-- [ ] Native tests emit expected phases for success, cancel, and error
+- [x] Canonical phases: downloading, verifying, detecting, transcribing, transcribing-cpu, complete, error, cancelled
+- [x] Frontend ignores unknown phases without dropping the job
+- [x] Native tests emit expected phases for success, cancel, and error
 
 ---
 

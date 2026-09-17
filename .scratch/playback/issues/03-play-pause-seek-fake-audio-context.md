@@ -4,12 +4,12 @@
 
 **Blocked by:** 02: Construct playback from a session, not a module-load singleton
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] Fake context records buffer sources, start/stop, gain ramps, and currentTime
-- [ ] Play with one and two tracks matches a known plan’s chunk start times and gains
-- [ ] Pause sets playhead to mapped source time and clears nodes
-- [ ] Seek while playing reschedules from the new position; empty session does not start playback
+- [x] Fake context records buffer sources, start/stop, gain ramps, and currentTime
+- [x] Play with one and two tracks matches a known plan’s chunk start times and gains
+- [x] Pause sets playhead to mapped source time and clears nodes
+- [x] Seek while playing reschedules from the new position; empty session does not start playback
 
 ---
 

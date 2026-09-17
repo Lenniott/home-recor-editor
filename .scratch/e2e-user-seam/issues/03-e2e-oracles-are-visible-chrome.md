@@ -4,10 +4,10 @@
 
 **Blocked by:** 02: E2e session starts from Import recordings, not an injected editor
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] Spec does not read playhead, kept duration, raw markers, or zoom duration from the session module
-- [ ] Cross-lane mark, preview, zoom, and cut-handle tests still catch the same regressions via UI
+- [x] Spec does not read playhead, kept duration, raw markers, or zoom duration from the session module
+- [x] Cross-lane mark, preview, zoom, and cut-handle tests still catch the same regressions via UI
 
 ---
 

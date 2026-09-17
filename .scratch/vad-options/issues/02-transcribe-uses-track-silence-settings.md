@@ -4,7 +4,7 @@
 
 **Blocked by:** 01: Shared Silero threshold helper for cleanup and transcription
 
-**Status:** ready-for-agent
+**Status:** done
 
 - [ ] UI threshold change before transcribe shows up in the VAD detect arguments
 - [ ] Same track, same setting → same thresholds as silence detection

@@ -4,7 +4,7 @@
 
 **Blocked by:** 03: One track failing transcription does not drop the rest of the queue
 
-**Status:** ready-for-agent
+**Status:** done
 
 - [ ] Two complete tracks and one missing → only the missing track runs
 - [ ] Again-run reprocesses the chosen scope and dirty rules match tickets 01 and 04

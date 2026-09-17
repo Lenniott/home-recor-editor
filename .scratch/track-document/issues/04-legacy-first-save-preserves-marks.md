@@ -4,7 +4,7 @@
 
 **Blocked by:** 01: Reload does not shrink silence marks when a buffer is set
 
-**Status:** ready-for-agent
+**Status:** done
 
 - [ ] Current-format manual silences contain the legacy marks
 - [ ] Settings and view fields preserved

@@ -4,7 +4,7 @@
 
 **Blocked by:** 01: Shared Silero threshold helper for cleanup and transcription
 
-**Status:** ready-for-agent
+**Status:** done
 
 - [ ] Detector tests and VAD e2e (if still present) use the helper
 - [ ] Changing the margin constant does not require hunting duplicated literals

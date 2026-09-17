@@ -4,7 +4,7 @@
 
 **Blocked by:** 03: Export session owns staging; the page only picks a destination
 
-**Status:** ready-for-agent
+**Status:** done
 
 - [ ] Two tracks at different rates never produce a misleading shared duration file
 - [ ] User sees one outcome: convert-and-export, or blocked with explanation

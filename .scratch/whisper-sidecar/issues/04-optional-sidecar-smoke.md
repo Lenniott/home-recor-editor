@@ -4,11 +4,13 @@
 
 **Blocked by:** 01: Progress phases are a shared contract; bundled whisper-cli and model cache on the runner
 
-**Status:** ready-for-agent
+**Status:** blocked-external
 
-- [ ] One-OS smoke is documented (CI optional)
+Skip script `npm run test:whisper-smoke` is in `package.json` and exits 0 unless `WHISPER_SMOKE=1`. Live smoke needs the sidecar binary under `src-tauri/binaries` (not present on this machine).
+
+- [x] One-OS smoke is documented (CI optional)
 - [ ] Complete event includes non-empty transcription
-- [ ] Existing cancel tests remain the fast gate
+- [x] Existing cancel tests remain the fast gate
 
 ---
 

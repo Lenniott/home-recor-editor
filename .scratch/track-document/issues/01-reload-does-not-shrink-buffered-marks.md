@@ -4,7 +4,7 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** done
 
 - [ ] Known marks plus buffer 150ms survive save → reload unchanged
 - [ ] On-disk detected vs manual silences match the current-format convention

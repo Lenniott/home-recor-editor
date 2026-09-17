@@ -4,11 +4,11 @@
 
 **Blocked by:** Sample JSON fixture from the pinned whisper-cli `-oj` output
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] Fixture matches the bundled engine version
-- [ ] Parse + restore yields expected word times
-- [ ] Failure message names a format break, not a generic assertion
+- [x] Fixture matches the bundled engine version
+- [x] Parse + restore yields expected word times
+- [x] Failure message names a format break, not a generic assertion
 
 ---
 

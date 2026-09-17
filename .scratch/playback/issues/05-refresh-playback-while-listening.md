@@ -4,11 +4,11 @@
 
 **Blocked by:** 03: Play, pause, and seek against a fake audio context
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] Switching to Preview edits while “playing” reschedules from the current playhead
-- [ ] Refresh while paused does not start playback
-- [ ] Mark/unmark while playing yields a schedule consistent with the current timeline
+- [x] Switching to Preview edits while “playing” reschedules from the current playhead
+- [x] Refresh while paused does not start playback
+- [x] Mark/unmark while playing yields a schedule consistent with the current timeline
 
 ---
 

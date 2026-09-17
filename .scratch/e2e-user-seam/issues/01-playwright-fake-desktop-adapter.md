@@ -4,11 +4,11 @@
 
 **Blocked by:** project-session 01: Import one recording and restore marks from a companion project
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] Tests register virtual files and dialog answers before visiting the editor
-- [ ] File operations do not depend on a one-line invoke stub that returns `1`
-- [ ] Existing unit tests are unchanged
+- [x] Tests register virtual files and dialog answers before visiting the editor
+- [x] File operations do not depend on a one-line invoke stub that returns `1`
+- [x] Existing unit tests are unchanged
 
 ---
 

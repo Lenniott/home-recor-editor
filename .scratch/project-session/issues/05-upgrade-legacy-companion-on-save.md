@@ -4,7 +4,7 @@
 
 **Blocked by:** 01: Import one recording and restore marks from a companion project
 
-**Status:** ready-for-agent
+**Status:** done
 
 - [ ] Duration mismatch → legacy error; session not given those marks
 - [ ] Duration match → marks, view, and settings restored; transcript missing

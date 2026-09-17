@@ -4,7 +4,7 @@
 
 **Blocked by:** 01: Edited render matches preview at silence and cut boundaries
 
-**Status:** ready-for-agent
+**Status:** done
 
 - [ ] Documented max error bound vs a dual-track OfflineAudio preview
 - [ ] Cases: two mono tracks, mixed mono+stereo, unequal lengths
