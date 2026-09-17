@@ -2,12 +2,9 @@ import { adjacentMarkedRegion, fitWindow, type NavDirection } from "./audio/mark
 import { vadDetectOptions } from "./audio/sileroThresholds";
 import {
   applySilenceBuffer,
-  mergeOverlappingMarkers,
   moveMarker,
   silenceRegionsFromAmplitude,
   silenceRegionsFromSpeechSegments,
-  subtractInterval,
-  unionInterval,
   type Marker,
   type RawMarker,
 } from "./audio/silence";
@@ -21,6 +18,7 @@ import {
   type ViewFilter,
 } from "./audio/timelineMap";
 import { EditHistory } from "./editHistory";
+import { MarkerList, markersFromV2, type TimelineMarker } from "./markers";
 import { reconcileProjectWithDuration, type ProjectFile } from "./projectFile";
 import {
   cutSuggestions,
@@ -188,7 +186,6 @@ export class TrackState {
 
 /** A track's undoable document state — see `SessionSnapshot`. */
 interface TrackSnapshot {
-  rawMarkers: RawMarker[];
   settings: SilenceSettings;
   speaker: string;
 }
@@ -203,6 +200,7 @@ interface TrackSnapshot {
 interface SessionSnapshot {
   /** Positional, matching `EditorState.tracks` — tracks are never added or removed by an undoable action. */
   tracks: TrackSnapshot[];
+  markers: TimelineMarker[];
   activeTrackId: string | null;
   cuts: Range[];
   dismissed: Range[];
@@ -226,13 +224,27 @@ function cloneSnapshot(snapshot: SessionSnapshot): SessionSnapshot {
     selectionTrackIds: [...snapshot.selectionTrackIds],
     selectionRanges: snapshot.selectionRanges.map(r => ({...r})),
     tracks: snapshot.tracks.map((track) => ({
-      rawMarkers: track.rawMarkers.map((r) => ({ ...r })),
       settings: { ...track.settings },
       speaker: track.speaker,
     })),
+    markers: snapshot.markers.map((marker) => ({ ...marker, laneIds: [...marker.laneIds] })),
     cuts: snapshot.cuts.map((r) => ({ ...r })),
     dismissed: snapshot.dismissed.map((r) => ({ ...r })),
   };
+}
+
+function markersEqual(a: TimelineMarker[], b: TimelineMarker[]): boolean {
+  return (
+    a.length === b.length &&
+    a.every(
+      (marker, i) =>
+        marker.id === b[i].id &&
+        marker.type === b[i].type &&
+        marker.start === b[i].start &&
+        marker.end === b[i].end &&
+        marker.laneIds.join() === b[i].laneIds.join(),
+    )
+  );
 }
 
 function regionsEqual(a: { start: number; end: number }[], b: { start: number; end: number }[]): boolean {
@@ -266,12 +278,12 @@ function snapshotsEqual(a: SessionSnapshot, b: SessionSnapshot): boolean {
     a.loopInOut === b.loopInOut &&
     regionsEqual(a.cuts, b.cuts) &&
     regionsEqual(a.dismissed, b.dismissed) &&
+    markersEqual(a.markers, b.markers) &&
     a.tracks.length === b.tracks.length &&
     a.tracks.every(
       (track, i) =>
         track.speaker === b.tracks[i].speaker &&
-        settingsEqual(track.settings, b.tracks[i].settings) &&
-        regionsEqual(track.rawMarkers, b.tracks[i].rawMarkers),
+        settingsEqual(track.settings, b.tracks[i].settings),
     )
   );
 }
@@ -346,6 +358,7 @@ export class EditorState {
   selectionRanges: { trackId: string; start: number; end: number }[] = $state([]);
   cutScopePreview = $state(false);
   markerAction: "silence" | "cut" = $state("silence");
+  markerList = new MarkerList();
   readonly selectionTracks = $derived(this.tracks.filter(t => this.selectionTrackIds.includes(t.id)));
   readonly selectionLabel = $derived(this.selectionTracks.map(t => t.speaker).join(" + "));
   readonly detectingAny = $derived(this.tracks.some(t => t.isDetectingSilence));
@@ -506,10 +519,10 @@ export class EditorState {
   private snapshot(): SessionSnapshot {
     return {
       tracks: this.tracks.map((track) => ({
-        rawMarkers: track.rawMarkers.map((r) => ({ ...r })),
         settings: { ...track.settings },
         speaker: track.speaker,
       })),
+      markers: this.markerList.all(),
       activeTrackId: this.activeTrack?.id ?? null,
       cuts: this.cuts.map((r) => ({ ...r })),
       dismissed: this.dismissed.map((r) => ({ ...r })),
@@ -532,12 +545,13 @@ export class EditorState {
     snapshot.tracks.forEach((track, index) => {
       const target = this.tracks[index];
       if (!target) return;
-      target.rawMarkers = track.rawMarkers;
       target.settings = track.settings;
       target.speaker = track.speaker;
     });
+    this.markerList = new MarkerList(this.tracks.map((track) => track.id));
+    this.markerList.replace(snapshot.markers);
+    this.projectMarks();
     this.activeTrackId = snapshot.activeTrackId;
-    this.cuts = snapshot.cuts;
     this.dismissed = snapshot.dismissed;
     this.preview = snapshot.preview;
     this.inSec = snapshot.inSec;
@@ -551,6 +565,16 @@ export class EditorState {
     this.selectionRanges = snapshot.selectionRanges.map(r => ({...r}));
     this.playheadSec = snapshot.playheadSec;
     this.loopInOut = snapshot.loopInOut;
+  }
+
+  private projectMarks(): void {
+    for (const track of this.tracks) track.rawMarkers = this.markerList.silencesOn(track.id);
+    this.cuts = normalize(this.markerList.cuts(), this.durationSec);
+  }
+
+  private resetMarkerList(): void {
+    this.markerList = new MarkerList(this.tracks.map((track) => track.id));
+    this.projectMarks();
   }
 
   /**
@@ -647,8 +671,8 @@ export class EditorState {
     track.load(buffer, fileName, monoSamples, filePath, sha256);
     this.tracks = [track];
     this.activeTrackId = track.id;
-    this.cuts = [];
     this.dismissed = [];
+    this.resetMarkerList();
     this.resetSessionState(buffer.duration);
     this.projectPath = null;
     // A freshly opened recording is a new document — Cmd+Z should never
@@ -667,8 +691,8 @@ export class EditorState {
     this.nextTrackNumber = 1;
     this.tracks = [];
     this.activeTrackId = null;
-    this.cuts = [];
     this.dismissed = [];
+    this.resetMarkerList();
     this.resetSessionState(0);
     this.projectPath = null;
     this.history.clear();
@@ -697,6 +721,8 @@ export class EditorState {
     track.load(buffer, fileName, monoSamples, filePath, sha256);
     this.tracks = [...this.tracks, track];
     this.activeTrackId = track.id;
+    this.markerList.setTrackIds(this.tracks.map((item) => item.id));
+    this.projectMarks();
     const duration = this.durationSec;
     this.outSec = Math.max(this.outSec, duration);
     // Only stretch the view when the new track actually extends the
@@ -728,7 +754,15 @@ export class EditorState {
     this.transcriptRestoreToken++;
 
     const duration = this.durationSec;
-    this.cuts = normalize(this.cuts, duration);
+    this.markerList.setTrackIds(remaining.map((track) => track.id));
+    this.markerList.replace(
+      this.markerList.all().flatMap((marker) => {
+        const start = Math.max(0, marker.start);
+        const end = Math.min(duration, marker.end);
+        return end > start ? [{ ...marker, start, end }] : [];
+      }),
+    );
+    this.projectMarks();
     this.dismissed = normalize(this.dismissed, duration);
     this.playheadSec = clamp(this.playheadSec, 0, duration);
     this.inSec = clamp(this.inSec, 0, duration);
@@ -796,12 +830,13 @@ export class EditorState {
       return { ...document, detected: [], manualSilences: document.detected, restored: [] };
     });
     return {
-      version: 2,
+      version: 3,
       name: (this.fileName ?? "Untitled").replace(/\.[^./\\]+$/, ""),
       sampleRate: this.sampleRate,
       tracks,
       cuts: this.cuts.map((r) => ({ ...r })),
       dismissed: this.dismissed.map((r) => ({ ...r })),
+      markers: this.markerList.all(),
       workspace: {
         activeTrackId: this.activeTrack?.id ?? tracks[0]?.id ?? "track-1",
         preview: this.preview,
@@ -839,7 +874,6 @@ export class EditorState {
       const reconciled = reconcileTrack(saved, track.durationSec, track.sourceSha256 ?? "");
       track.speaker = reconciled.speaker;
       track.settings = { ...reconciled.settings };
-      track.rawMarkers = trackSilences(reconciled).map((r) => ({ start: r.start, end: r.end }));
       track.transcriptWords = reconciled.transcript.words.map((w) => ({ ...w }));
       track.transcriptStatus = reconciled.transcript.status;
     });
@@ -847,7 +881,23 @@ export class EditorState {
     this.projectPath = projectPath;
 
     const duration = this.durationSec;
-    this.cuts = normalize(project.cuts, duration);
+    const idMap = new Map(project.tracks.map((saved, index) => [saved.id, this.tracks[index]?.id]));
+    const rawMarkers = project.markers ?? markersFromV2(
+      project.tracks.map((track) => ({ id: track.id, manualSilences: trackSilences(track) })),
+      project.cuts,
+      project.tracks.map((track) => track.id),
+    );
+    this.markerList = new MarkerList(this.tracks.map((track) => track.id));
+    this.markerList.replace(
+      rawMarkers.flatMap((marker) => {
+        const laneIds = [...new Set(marker.laneIds.map((id) => idMap.get(id)).filter((id): id is string => Boolean(id)))];
+        const start = Math.max(0, marker.start);
+        const end = Math.min(duration, marker.end);
+        if (!laneIds.length || end <= start) return [];
+        return [{ ...marker, start, end, laneIds: marker.type === "cut" ? this.tracks.map((track) => track.id) : laneIds }];
+      }),
+    );
+    this.projectMarks();
     this.dismissed = normalize(project.dismissed, duration);
 
     const w = project.workspace;
@@ -880,15 +930,17 @@ export class EditorState {
    * so the saved seconds carry over directly. Version 1 never had a
    * speaker name, a transcript, or its own project path distinct from the
    * sidecar convention — `loadAudio`'s defaults for those stand, and
-   * `toProjectV2` upgrades this project to version 2 the next time it's
+   * `toProjectV2` upgrades this project to version 3 the next time it's
    * saved.
    */
   applyLegacyProject(project: ProjectFile, projectPath: string): void {
     const track = this.tracks[0];
     if (!track) return;
     const reconciled = reconcileProjectWithDuration(project, track.durationSec);
-    track.rawMarkers = reconciled.rawMarkers.map((r) => ({ start: r.start, end: r.end }));
     track.settings = { ...reconciled.settings };
+    this.markerList = new MarkerList([track.id]);
+    for (const range of reconciled.rawMarkers) this.markerList.add("silence", range.start, range.end, [track.id]);
+    this.projectMarks();
     this.inSec = reconciled.inSec;
     this.outSec = reconciled.outSec;
     this.setView(reconciled.viewStartSec, reconciled.viewDurationSec);
@@ -1013,7 +1065,8 @@ export class EditorState {
           ...silenceRegionsFromSpeechSegments(segments, track.durationSec, track.settings.minSilenceMs),
           ...silenceRegionsFromAmplitude(track.monoSamples, track.sampleRate, track.settings.quietThresholdDb, track.settings.minSilenceMs),
         ])
-          track.rawMarkers = unionInterval(track.rawMarkers, range.start, range.end);
+          this.markerList.add("silence", range.start, range.end, [track.id]);
+        this.projectMarks();
       });
     } catch (err) {
       track.detectionError = err instanceof Error ? err.message : String(err);
@@ -1063,7 +1116,8 @@ export class EditorState {
         track.settings.quietThresholdDb,
         track.settings.minSilenceMs,
       );
-      track.rawMarkers = quiet.reduce((acc, r) => unionInterval(acc, r.start, r.end), track.rawMarkers);
+      for (const range of quiet) this.markerList.add("silence", range.start, range.end, [track.id]);
+      this.projectMarks();
     });
   }
 
@@ -1078,12 +1132,13 @@ export class EditorState {
    * happens to be, discarding the extension the merge just made.
    */
   moveMarker(track: TrackState, markerIndex: number, edge: "start" | "end", newDisplayedSec: number): void {
-    const raw = track.rawMarkers[markerIndex];
-    if (!raw) return;
+    const mark = this.silenceMarkAt(track, markerIndex);
+    if (!mark) return;
     const clamped = clamp(newDisplayedSec, 0, track.durationSec);
-    const next = [...track.rawMarkers];
-    next[markerIndex] = moveMarker(raw, track.settings.bufferMs, edge, clamped);
-    track.rawMarkers = next;
+    const moved = moveMarker({ start: mark.start, end: mark.end }, track.settings.bufferMs, edge, clamped);
+    this.markerList.resize(mark.id, "start", moved.start);
+    this.markerList.resize(mark.id, "end", moved.end);
+    this.projectMarks();
   }
 
   /**
@@ -1092,7 +1147,12 @@ export class EditorState {
    * Below that threshold they stay as dragged. Select-drag never uses this.
    */
   finishMarkerDrag(track: TrackState, _markerIndex: number): void {
-    track.rawMarkers = mergeOverlappingMarkers(track.rawMarkers);
+    this.markerList.mergeOverlapping();
+    this.projectMarks();
+  }
+
+  private silenceMarkAt(track: TrackState, index: number): TimelineMarker | undefined {
+    return this.markerList.all().filter((marker) => marker.type === "silence" && marker.laneIds.includes(track.id)).sort((a, b) => a.start - b.start)[index];
   }
 
   /** Update the pending drag-to-select range. Order-independent; call repeatedly while dragging. */
@@ -1138,10 +1198,18 @@ export class EditorState {
     this.commitEdit(() => {
       const range = this.selectionRange;
       if (!range) return;
-      for (const target of track ? [track] : this.selectionTracks) {
+      const targets = track ? [track] : this.selectionTracks;
+      const groups = new Map<string, { start: number; end: number; laneIds: string[] }>();
+      for (const target of targets) {
         const span = track ? range : this.selectionFor(target);
-        if (span) target.rawMarkers = unionInterval(target.rawMarkers, span.start, span.end);
+        if (!span) continue;
+        const key = `${span.start}:${span.end}`;
+        const group = groups.get(key);
+        if (group) group.laneIds.push(target.id);
+        else groups.set(key, { start: span.start, end: span.end, laneIds: [target.id] });
       }
+      for (const group of groups.values()) this.markerList.add("silence", group.start, group.end, group.laneIds);
+      this.projectMarks();
       this.clearSelection();
     });
   }
@@ -1156,8 +1224,9 @@ export class EditorState {
       if (!range) return;
       for (const target of track ? [track] : this.selectionTracks) {
         const span = track ? range : this.selectionFor(target);
-        if (span) target.rawMarkers = subtractInterval(target.rawMarkers, span.start, span.end);
+        if (span) this.markerList.subtract("silence", span.start, span.end, [target.id]);
       }
+      this.projectMarks();
       this.clearSelection();
     });
   }
@@ -1194,7 +1263,9 @@ export class EditorState {
     this.commitEdit(() => {
       this.cuts = normalize([...this.cuts, ...ranges], this.durationSec);
       this.dismissed = subtract(this.dismissed, ranges);
-      for (const track of this.tracks) track.rawMarkers = [];
+      for (const range of ranges) this.markerList.add("cut", range.start, range.end, this.tracks.map((item) => item.id));
+      this.markerList.replace(this.markerList.all().filter((marker) => marker.type !== "silence"));
+      this.projectMarks();
       this.clearSelection();
     });
   }
@@ -1206,13 +1277,17 @@ export class EditorState {
   }
 
   moveCut(index: number, edge: "start" | "end", sec: number): void {
-    const range = this.cuts[index];
-    if (!range) return;
-    const value = clamp(sec, edge === "end" ? range.start + .001 : 0, edge === "start" ? range.end - .001 : this.durationSec);
-    this.cuts = this.cuts.map((cut,i) => i === index ? {...cut,[edge]:value} : cut);
+    const mark = this.markerList.all().filter((marker) => marker.type === "cut").sort((a, b) => a.start - b.start)[index];
+    if (!mark) return;
+    const value = clamp(sec, edge === "end" ? mark.start + .001 : 0, edge === "start" ? mark.end - .001 : this.durationSec);
+    this.markerList.resize(mark.id, edge, value);
+    this.projectMarks();
   }
 
-  finishCutDrag(): void { this.cuts = normalize(this.cuts, this.durationSec); }
+  finishCutDrag(): void {
+    this.markerList.mergeOverlapping();
+    this.projectMarks();
+  }
 
   /** Completing a drag only selects; marking is always explicit. */
   finishSelectionDrag(_track: TrackState | null = this.activeTrack): void {
@@ -1229,7 +1304,8 @@ export class EditorState {
     this.commitEdit(() => {
       this.setPreview("original");
       this.setViewFilter("all");
-      this.cuts = normalize([...this.cuts, range], this.durationSec);
+      this.markerList.add("cut", range.start, range.end, this.tracks.map((track) => track.id));
+      this.projectMarks();
       // A cut that's been accepted has nothing left to suggest or dismiss.
       this.dismissed = subtract(this.dismissed, [range]);
     });
@@ -1238,7 +1314,8 @@ export class EditorState {
   /** Put a cut's time back on the timeline. */
   restoreCut(range: Range): void {
     this.commitEdit(() => {
-      this.cuts = subtract(this.cuts, [range]);
+      this.markerList.subtract("cut", range.start, range.end, this.tracks.map((track) => track.id));
+      this.projectMarks();
     });
   }
 

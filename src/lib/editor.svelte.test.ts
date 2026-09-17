@@ -119,8 +119,8 @@ describe("applyLegacyProject", () => {
     expect(editor.transcriptStatus).toBe("missing"); // version 1 never had a transcript
     expect(editor.dirty).toBe(false);
 
-    // The next save upgrades it to version 2 in place.
-    expect(editor.toProjectV2("/rec/a.hre.json").version).toBe(2);
+    // The next save upgrades it to the current project version in place.
+    expect(editor.toProjectV2("/rec/a.hre.json").version).toBe(3);
   });
 });
 
@@ -549,7 +549,7 @@ describe("cleanup review workflow", () => {
   });
   it("leaves a selection pending even when it overlaps an existing marker", () => {
     const e = twoTrackEditor();
-    e.activeTrack!.rawMarkers = [{start: 2, end: 4}];
+    mark(e, e.activeTrack!, 2, 4);
     e.setSelection(2, 5);
     e.finishSelectionDrag();
     expect(e.selectionRange).toEqual({start: 2, end: 5});
@@ -558,7 +558,7 @@ describe("cleanup review workflow", () => {
 
   it("finishSelectionDrag leaves overlapping selection unmarked", () => {
     const e = twoTrackEditor();
-    e.activeTrack!.rawMarkers = [{ start: 1, end: 3 }];
+    mark(e, e.activeTrack!, 1, 3);
     e.setSelection(2, 4);
     e.finishSelectionDrag();
     expect(e.selectionRange).toEqual({ start: 2, end: 4 });
@@ -570,7 +570,7 @@ describe("all-track analysis and speech scope", () => {
   it("runs speech detection sequentially for every track while preserving manual marks", async () => {
     const e = twoTrackEditor();
     e.tracks.forEach(t => t.monoSamples.fill(.5));
-    e.tracks[0].rawMarkers = [{start:1,end:2}];
+    mark(e, e.tracks[0], 1, 2);
     let active = 0, peak = 0;
     const detector = vi.spyOn(vadDetector, "detect").mockImplementation(async () => {
       active++; peak = Math.max(active,peak);
@@ -657,6 +657,26 @@ describe("unified marker actions and zoom", () => {
     e.undo();
     expect(e.cuts).toHaveLength(2);
   });
+
+  it("editor Mark on both selected lanes creates one id", () => {
+    const e = twoTrackEditor();
+    e.setSelection(1, 2, e.tracks.map((track) => track.id));
+    e.markSelection();
+    const silences = e.markerList.all().filter((marker) => marker.type === "silence");
+    expect(silences).toHaveLength(1);
+    expect(silences[0].laneIds).toEqual(e.tracks.map((track) => track.id));
+  });
+
+  it("undo restores the previous marker list", () => {
+    const e = twoTrackEditor();
+    e.setSelection(1, 2, e.tracks.map((track) => track.id));
+    e.markSelection();
+    const before = e.markerList.all();
+    e.setSelection(3, 4, [e.tracks[0].id]);
+    e.markSelection();
+    e.undo();
+    expect(e.markerList.all()).toEqual(before);
+  });
   it("uses reciprocal zoom steps and clamps to the available timeline", () => {
     const e = twoTrackEditor();
     e.zoomView(.8);
@@ -693,6 +713,25 @@ describe("track document round-trip", () => {
     mark(editor, editor.tracks[0], 1, 3);
     mark(editor, editor.tracks[1], 2, 4);
     expect(editor.cutSuggestionList).toEqual([{ start: 2, end: 3 }]);
+    editor.setSelection(5, 8, editor.tracks.map((track) => track.id));
+    editor.markSelection();
+    expect(editor.cutSuggestionList).toEqual([{ start: 2, end: 3 }, { start: 5, end: 8 }]);
+  });
+
+  it("save/reload keeps a two-lane silence as one mark", () => {
+    const editor = twoTrackEditor();
+    editor.setBufferMs(0, editor.tracks[0]);
+    editor.setBufferMs(0, editor.tracks[1]);
+    editor.setSelection(1, 2, editor.tracks.map((track) => track.id));
+    editor.markSelection();
+    const saved = editor.toProjectV2("/rec/dual.hre.json");
+    expect(saved.markers?.filter((marker) => marker.type === "silence")).toHaveLength(1);
+    const reloaded = twoTrackEditor();
+    reloaded.applyProjectV2(saved, "/rec/dual.hre.json");
+    const silences = reloaded.markerList.all().filter((marker) => marker.type === "silence");
+    expect(silences).toHaveLength(1);
+    expect(silences[0].laneIds).toEqual(reloaded.tracks.map((track) => track.id));
+    expect(reloaded.tracks.map((track) => track.rawMarkers)).toEqual([[{ start: 1, end: 2 }], [{ start: 1, end: 2 }]]);
   });
 
   it("applyProjectV2 with two saved tracks and one loaded lane does not copy the second track's marks onto the first", () => {
@@ -723,7 +762,7 @@ describe("track document round-trip", () => {
     editor.loadAudio(buffer(), "a.wav", new Float32Array(160000), "/rec/a.wav", "a".repeat(64));
     editor.applyLegacyProject(legacy, "/rec/a.hre.json");
     const saved = editor.toProjectV2("/rec/a.hre.json");
-    expect(saved.version).toBe(2);
+    expect(saved.version).toBe(3);
     expect(saved.tracks[0].manualSilences).toEqual([{ start: 1, end: 2 }]);
   });
 });

@@ -111,7 +111,12 @@ describe("cutSuggestions", () => {
 describe("parsePodcastProject / serializePodcastProject round-trip", () => {
   it("round-trips a well-formed project", () => {
     const p = project();
-    expect(parsePodcastProject(serializePodcastProject(p))).toEqual(p);
+    const round = parsePodcastProject(serializePodcastProject(p));
+    expect(round.version).toBe(3);
+    expect(round.tracks).toEqual(p.tracks);
+    expect(round.cuts).toEqual(p.cuts);
+    expect(round.workspace).toEqual(p.workspace);
+    expect(round.markers).toEqual([]);
   });
 
   it("rejects an unsupported version", () => {
@@ -150,6 +155,30 @@ describe("parsePodcastProject / serializePodcastProject round-trip", () => {
   it("clamps sidebarWidth into its allowed range", () => {
     const p = project({ workspace: { ...project().workspace, sidebarWidth: 10 } });
     expect(parsePodcastProject(JSON.stringify(p)).workspace.sidebarWidth).toBe(260);
+  });
+
+  it("opens v2 per-track silences as one-lane marks and keeps a two-lane silence as one record on save", () => {
+    const v2 = project({
+      tracks: [
+        track({ id: "a", manualSilences: [{ start: 1, end: 2 }] }),
+        track({ id: "b", source: { path: "b.wav", name: "b.wav", sha256: "b".repeat(64), duration: 10 }, manualSilences: [{ start: 1, end: 2 }] }),
+      ],
+      cuts: [{ start: 5, end: 6 }],
+      workspace: { ...project().workspace, activeTrackId: "a" },
+    });
+    const opened = parsePodcastProject(JSON.stringify(v2));
+    expect(opened.markers?.filter((m) => m.type === "silence")).toHaveLength(2);
+    expect(opened.markers?.filter((m) => m.type === "cut")).toHaveLength(1);
+
+    const saved = JSON.parse(serializePodcastProject({
+      ...opened,
+      markers: [{ id: "m1", type: "silence", start: 1, end: 2, laneIds: ["a", "b"] }],
+    }));
+    expect(saved.version).toBe(3);
+    const silences = saved.markers.filter((m: { type: string }) => m.type === "silence");
+    expect(silences).toHaveLength(1);
+    expect(silences[0].laneIds).toEqual(["a", "b"]);
+    expect(parsePodcastProject(JSON.stringify(saved)).markers?.filter((m) => m.type === "silence")).toHaveLength(1);
   });
 });
 

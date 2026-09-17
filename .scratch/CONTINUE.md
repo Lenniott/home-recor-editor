@@ -19,14 +19,25 @@ Read this file when the user says **continue**, **delivery**, **TDD**, or **arch
 | Item | State |
 |------|--------|
 | Branch | current |
-| Latest | workflow only — no in-flight program |
-| Frontier | none |
+| Latest | markers 01: unified silence/cut list; v3 save; two-lane silence is one mark |
+| Frontier | markers 02, export-session 01, transcript-search 01 |
 
 ## Next
 
-_(empty)_
+- `.scratch/markers/issues/02-type-change-drop-convert-all.md` — mutex MARKERS
+- `.scratch/export-session/issues/01-merge-and-stereo-layout.md` — mutex EXPORT
+- `.scratch/transcript-search/issues/01-find-phrase.md` — mutex TRANSCRIPT
 
-When starting a program: add area folders with `TDD.md` + `issues/`, grant mutexes in `DELIVERY.md`, put one ready ticket path in **Next**.
+## Where to look
+
+Do not scan the repo first. Ticket → `.scratch/WORKER.md` → that area’s `TDD.md` `## NN` → locked decisions in `.scratch/DELIVERY.md`.
+
+**Landed (markers 01, verified in the Tauri app):** `src/lib/markers.ts` is the list (`add` / `resize` / `subtract` / `replace` / `all`). No `setType` yet. `EditorState.markerList` is source of truth; `projectMarks()` writes per-lane `rawMarkers` and `cuts`. `src/lib/projectV2.ts` opens v2 as one-lane silences + all-lane cuts and saves v3 `markers`. Tests: `src/lib/markers.test.ts`, Mark/undo/save in `src/lib/editor.svelte.test.ts`.
+
+**Next code (not a tour):**
+- MARKERS 02: `MarkerList` + `convertAllSilencesToCuts` in `src/lib/editor.svelte.ts`; button in `src/routes/+page.svelte`; e2e name in `e2e/editor.spec.ts`; README convert-all bullet
+- EXPORT 01: `src/lib/exportSession.ts`, `src/lib/audio/exportMix.ts`, `src/lib/exportNames.ts`, `src/lib/components/FileMenu.svelte`
+- TRANSCRIPT 01: `src/lib/components/TranscriptPanel.svelte`, `src/lib/transcript.ts` — skip if a MARKERS worker has those tests
 
 ## Pointers
 
@@ -34,3 +45,4 @@ When starting a program: add area folders with `TDD.md` + `issues/`, grant mutex
 - One-ticket TDD: `.scratch/WORKER.md`
 - First red: `.scratch/<area>/TDD.md`
 - Tickets: `.scratch/<area>/issues/`
+- Deferred: `.scratch/later.md`

@@ -26,6 +26,7 @@ Stay on the branch named in `.scratch/CONTINUE.md` Status. Do not create a per-t
 4. Repeat for the next AC as the next red test, one at a time, using **Next reds** in `TDD.md` as the menu.
 5. When ACs are checked: `npm test` and `npm run check`. Rust tickets also `cargo test --manifest-path src-tauri/Cargo.toml`.
 6. Stop. Leave a 2–4 sentence note: tests added, behavior now true, anything you refused to expand. Add **Manual test:** either `none — <reason>` or 2–5 steps for the Tauri app.
+7. If the ticket asks for LOG.md: `python3 "$HOME/.cursor/skills/log-work/scripts/log.py" "<telegraphic outcome>"`. Update README only when an AC says so. Never edit `.scratch/CONTINUE.md`.
 
 ## Done
 

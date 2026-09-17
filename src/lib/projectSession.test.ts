@@ -505,7 +505,7 @@ describe("legacy companion import", () => {
     expect(opened.tracks[0].rawMarkers).toEqual([{ start: 1, end: 2 }]);
     const saved = await saveProject({ editor, desktop, blockedSavePath: null });
     expect(saved.error).toBe(null);
-    expect(desktop.files.get("/rec/a.hre.json")).toContain('"version": 2');
+    expect(desktop.files.get("/rec/a.hre.json")).toContain('"version": 3');
     expect(desktop.files.get("/rec/a.hre.json")).toContain("sha256");
   });
 });

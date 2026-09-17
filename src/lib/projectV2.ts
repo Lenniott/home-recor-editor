@@ -2,6 +2,7 @@ import type { TranscriptWord } from './transcript';
 import type { ProjectSettings } from './projectFile';
 import type { ViewFilter } from './audio/timelineMap';
 import { applySilenceBuffer, subtractInterval, unionInterval } from './audio/silence';
+import { markersFromV2, type TimelineMarker } from './markers';
 
 export interface Range { start: number; end: number }
 export interface TrackDocument {
@@ -31,13 +32,14 @@ export interface Workspace {
   muteMarked: boolean;
 }
 export interface PodcastProject {
-  version: 2;
+  version: 2 | 3;
   name: string;
   sampleRate: number;
   tracks: TrackDocument[];
   cuts: Range[];
   dismissed: Range[];
   workspace: Workspace;
+  markers?: TimelineMarker[];
 }
 export const DEFAULT_SETTINGS: ProjectSettings = { positiveSpeechThreshold: 0.5, minSilenceMs: 1200, bufferMs: 150, quietThresholdDb: -40 };
 export function normalize(ranges: Range[], duration = Infinity): Range[] {
@@ -80,7 +82,7 @@ function ranges(value: unknown, duration: number): Range[] {
 /** Reject malformed projects before replacing the current session. No silent loss of edits. */
 export function parsePodcastProject(json: string): PodcastProject {
   const p = JSON.parse(json);
-  if (p?.version !== 2 || typeof p.name !== 'string' || !finite(p.sampleRate) || p.sampleRate < 8000 || p.sampleRate > 192000 || !Number.isInteger(p.sampleRate) || !Array.isArray(p.tracks) || p.tracks.length < 1 || p.tracks.length > 2) throw new Error('Invalid podcast project');
+  if ((p?.version !== 2 && p?.version !== 3) || typeof p.name !== 'string' || !finite(p.sampleRate) || p.sampleRate < 8000 || p.sampleRate > 192000 || !Number.isInteger(p.sampleRate) || !Array.isArray(p.tracks) || p.tracks.length < 1 || p.tracks.length > 2) throw new Error('Invalid podcast project');
   const ids = new Set<string>();
   for (const t of p.tracks) {
     if (!t || typeof t.id !== 'string' || !t.id || ids.has(t.id) || typeof t.speaker !== 'string' || typeof t.source?.path !== 'string' || typeof t.source?.name !== 'string' || !/^[a-f0-9]{64}$/.test(t.source?.sha256) || !finite(t.source.duration) || t.source.duration <= 0) throw new Error('Invalid track source');
@@ -97,15 +99,48 @@ export function parsePodcastProject(json: string): PodcastProject {
   }
   const duration = Math.max(...p.tracks.map((t: TrackDocument) => t.source.duration));
   p.cuts = ranges(p.cuts, duration); p.dismissed = ranges(p.dismissed, duration);
+  const idsList = [...ids];
+  if (p.version === 3) {
+    p.markers = parseMarkers(p.markers, idsList, duration);
+  } else {
+    p.markers = markersFromV2(p.tracks, p.cuts, idsList);
+  }
   const w = p.workspace;
   if (!w || !ids.has(w.activeTrackId) || !['original', 'edited', 'review'].includes(w.preview) || !['transcript', 'cleanup', 'edits'].includes(w.tab) || ![w.viewStartSec, w.viewDurationSec, w.inSec, w.outSec, w.sidebarWidth].every(finite) || w.inSec < 0 || w.outSec > duration || w.outSec < w.inSec || w.viewStartSec < 0 || w.viewDurationSec <= 0 || typeof w.loop !== 'boolean' || typeof w.sidebarOpen !== 'boolean' || !['all', 'hideMarked', 'hideUnmarked'].includes(w.viewFilter) || typeof w.muteMarked !== 'boolean') throw new Error('Invalid project workspace');
   w.sidebarWidth = Math.max(260, Math.min(520, w.sidebarWidth));
   return p as PodcastProject;
 }
 
+function parseMarkers(value: unknown, trackIds: string[], duration: number): TimelineMarker[] {
+  if (!Array.isArray(value)) throw new Error('Invalid project markers');
+  const allowed = new Set(trackIds);
+  const markers: TimelineMarker[] = [];
+  for (const marker of value) {
+    if (!marker || typeof marker.id !== 'string' || !marker.id || (marker.type !== 'silence' && marker.type !== 'cut') || !finite(marker.start) || !finite(marker.end)) {
+      throw new Error('Invalid project markers');
+    }
+    if (!Array.isArray(marker.laneIds) || marker.laneIds.some((id: unknown) => typeof id !== 'string' || !allowed.has(id))) {
+      throw new Error('Invalid project markers');
+    }
+    const start = Math.max(0, marker.start);
+    const end = Math.min(duration, marker.end);
+    if (end <= start) continue;
+    markers.push({
+      id: marker.id,
+      type: marker.type,
+      start,
+      end,
+      laneIds: marker.type === 'cut' ? [...trackIds] : [...new Set(marker.laneIds as string[])],
+    });
+  }
+  return markers;
+}
+
 /** Build the on-disk JSON string for a project — the write-side counterpart to `parsePodcastProject`. */
 export function serializePodcastProject(project: PodcastProject): string {
-  return JSON.stringify(project, null, 2);
+  const trackIds = project.tracks.map((track) => track.id);
+  const markers = project.markers ?? markersFromV2(project.tracks, project.cuts, trackIds);
+  return JSON.stringify({ ...project, version: 3, markers }, null, 2);
 }
 
 /**

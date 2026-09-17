@@ -43,7 +43,7 @@ Agents pick up queued work from `.scratch/CONTINUE.md` when asked to continue.
 
 ## Cleanup workflow
 
-- Drag within one waveform to select that speaker; drag across both lanes to select both. Silence marks affect only the selected lanes. Selecting alone never applies a mark.
+- Drag within one waveform to select that speaker; drag across both lanes to select both. A silence dragged across both lanes is **one** synced mark (resize moves both lanes together). One-lane silences stay independent, including when opening older v2 projects. Selecting alone never applies a mark.
 - Both marker actions use the same selection, Mark/Unmark, click-to-select, draggable edges, and undo workflow. A cut always spans both tracks and remains a pending marker until preview/export. Cut edges can also be dragged in the shared marker lane.
 - Cleanup can run **VAD + silence floor** or the **silence floor only** across all tracks. Settings belong to the active speaker. Audio below the quiet floor is included even if it contains quiet speech. Scroll over a lane's dB ruler to amplify quiet detail down to −60 dB; scroll back out or double-click to restore the normal 0/−6/−12 view. The selected floor is drawn across each lane.
 - **Silence gap** controls the minimum detected pause and the pause between transcript paragraphs. Speaker changes also start a new paragraph.
