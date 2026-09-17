@@ -211,3 +211,36 @@ export function subtractInterval(
   }
   return result.sort((a, b) => a.start - b.start);
 }
+
+/** Overlap must cover at least this fraction of the shorter marker before they merge. */
+export const AUTO_MERGE_OVERLAP_FRACTION = 0.4;
+
+/**
+ * Merge raw markers whose overlap exceeds `AUTO_MERGE_OVERLAP_FRACTION` of
+ * the shorter span. Pointer-up on a silence edge uses this; select-drag does not.
+ */
+export function mergeOverlappingMarkers(
+  markers: RawMarker[],
+  overlapFraction = AUTO_MERGE_OVERLAP_FRACTION,
+): RawMarker[] {
+  const sorted = [...markers].sort((a, b) => a.start - b.start);
+  const merged: RawMarker[] = [];
+  for (const marker of sorted) {
+    const previous = merged[merged.length - 1];
+    if (!previous) {
+      merged.push({ ...marker });
+      continue;
+    }
+    const overlapStart = Math.max(previous.start, marker.start);
+    const overlapEnd = Math.min(previous.end, marker.end);
+    const overlapSec = Math.max(0, overlapEnd - overlapStart);
+    const shorterLengthSec = Math.min(previous.end - previous.start, marker.end - marker.start);
+    if (shorterLengthSec > 0 && overlapSec / shorterLengthSec >= overlapFraction) {
+      previous.start = Math.min(previous.start, marker.start);
+      previous.end = Math.max(previous.end, marker.end);
+    } else {
+      merged.push({ ...marker });
+    }
+  }
+  return merged;
+}

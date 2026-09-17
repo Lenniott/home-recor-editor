@@ -1,10 +1,28 @@
 <script lang="ts">
+  import { setContext } from "svelte";
   import { on } from "svelte/events";
   import { editor } from "../editor.svelte";
   import { laneLayout } from "../audio/laneLayout";
+  import { LANE_BOUNDS_KEY, type LaneBounds } from "../audio/lanePointer";
   import CutLane from "./CutLane.svelte";
   import TimelineRuler from "./TimelineRuler.svelte";
   import TrackLane from "./TrackLane.svelte";
+
+  let laneBounds: LaneBounds[] = $state([]);
+  setContext(LANE_BOUNDS_KEY, () => laneBounds);
+
+  function attachLanes(node: HTMLElement) {
+    const measure = () => {
+      laneBounds = Array.from(node.querySelectorAll<HTMLElement>("[data-track-lane]")).map((lane) => {
+        const box = lane.getBoundingClientRect();
+        return { id: lane.dataset.trackLane!, top: box.top, bottom: box.bottom };
+      });
+    };
+    const observer = new ResizeObserver(measure);
+    observer.observe(node);
+    measure();
+    return () => observer.disconnect();
+  }
 
   let { compact = false }: { compact?: boolean } = $props();
 
@@ -108,7 +126,9 @@
     {#if !compact}
       <CutLane stripOnly />
     {/if}
-    {#each editor.tracks as track (track.id)}<TrackLane {track} {compact} />{/each}
+    <div class="lanes" {@attach attachLanes}>
+      {#each editor.tracks as track (track.id)}<TrackLane {track} {compact} />{/each}
+    </div>
   {/if}
 </section>
 
@@ -143,6 +163,14 @@
   .empty .hint {
     font-size: 0.8rem;
     opacity: 0.6;
+  }
+
+  .lanes {
+    display: flex;
+    flex-direction: column;
+    gap: inherit;
+    min-height: 0;
+    flex: 1;
   }
 
   .compact {

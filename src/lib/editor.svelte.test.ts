@@ -555,6 +555,15 @@ describe("cleanup review workflow", () => {
     expect(e.selectionRange).toEqual({start: 2, end: 5});
     expect(e.rawMarkers).toEqual([{start: 2, end: 4}]);
   });
+
+  it("finishSelectionDrag leaves overlapping selection unmarked", () => {
+    const e = twoTrackEditor();
+    e.activeTrack!.rawMarkers = [{ start: 1, end: 3 }];
+    e.setSelection(2, 4);
+    e.finishSelectionDrag();
+    expect(e.selectionRange).toEqual({ start: 2, end: 4 });
+    expect(e.rawMarkers).toEqual([{ start: 1, end: 3 }]);
+  });
 });
 
 describe("all-track analysis and speech scope", () => {
@@ -658,6 +667,77 @@ describe("unified marker actions and zoom", () => {
     expect(e.viewStartSec).toBe(0);
     e.zoomView(.000001);
     expect(e.viewDurationSec).toBe(.2);
+  });
+});
+
+describe("track document round-trip", () => {
+  it("save then applyProjectV2 keeps rawMarkers when bufferMs is 150", () => {
+    const editor = new EditorState();
+    editor.loadAudio(buffer(), "a.wav", new Float32Array(160000), "/rec/a.wav", "a".repeat(64));
+    editor.setBufferMs(150);
+    editor.setSelection(1, 2);
+    editor.markSelection();
+    const saved = editor.toProjectV2("/rec/a.hre.json");
+    const reloaded = new EditorState();
+    reloaded.loadAudio(buffer(), "a.wav", new Float32Array(160000), "/rec/a.wav", "a".repeat(64));
+    reloaded.applyProjectV2(saved, "/rec/a.hre.json");
+    expect(reloaded.rawMarkers).toEqual([{ start: 1, end: 2 }]);
+  });
+
+  it("cutSuggestionList equals cutSuggestions of each track's silence document", () => {
+    const editor = twoTrackEditor();
+    editor.setBufferMs(0, editor.tracks[0]);
+    editor.setBufferMs(0, editor.tracks[1]);
+    editor.setMinSilenceMs(0, editor.tracks[0]);
+    editor.setMinSilenceMs(0, editor.tracks[1]);
+    mark(editor, editor.tracks[0], 1, 3);
+    mark(editor, editor.tracks[1], 2, 4);
+    expect(editor.cutSuggestionList).toEqual([{ start: 2, end: 3 }]);
+  });
+
+  it("applyProjectV2 with two saved tracks and one loaded lane does not copy the second track's marks onto the first", () => {
+    const saved = twoTrackEditor();
+    mark(saved, saved.tracks[0], 1, 2);
+    mark(saved, saved.tracks[1], 5, 6);
+    const snapshot = saved.toProjectV2("/rec/dual.hre.json");
+    const editor = new EditorState();
+    editor.loadAudio(buffer(), "a.wav", new Float32Array(160000), "/rec/a.wav", "a".repeat(64));
+    editor.applyProjectV2(snapshot, "/rec/dual.hre.json");
+    expect(editor.tracks).toHaveLength(1);
+    expect(editor.rawMarkers).toEqual([{ start: 1, end: 2 }]);
+  });
+
+  it("legacy apply then toProjectV2 writes those marks as manualSilences", () => {
+    const legacy: ProjectFile = {
+      version: 1,
+      audioFileName: "a.wav",
+      durationSec: 10,
+      rawMarkers: [{ start: 1, end: 2 }],
+      inSec: 0,
+      outSec: 10,
+      settings: { positiveSpeechThreshold: 0.5, minSilenceMs: 300, bufferMs: 150, quietThresholdDb: -40 },
+      viewStartSec: 0,
+      viewDurationSec: 10,
+    };
+    const editor = new EditorState();
+    editor.loadAudio(buffer(), "a.wav", new Float32Array(160000), "/rec/a.wav", "a".repeat(64));
+    editor.applyLegacyProject(legacy, "/rec/a.hre.json");
+    const saved = editor.toProjectV2("/rec/a.hre.json");
+    expect(saved.version).toBe(2);
+    expect(saved.tracks[0].manualSilences).toEqual([{ start: 1, end: 2 }]);
+  });
+});
+
+describe("transcript dirty", () => {
+  it("completing a transcript marks dirty and undo does not remove the words", () => {
+    const editor = new EditorState();
+    editor.loadAudio(buffer(), "a.wav", new Float32Array(160000), "/rec/a.wav", "a".repeat(64));
+    editor.markSaved(editor.revision);
+    editor.applyTranscript(editor.tracks[0].id, [{ text: "Hi", start: 0, end: 0.2 }], "complete");
+    expect(editor.dirty).toBe(true);
+    editor.undo();
+    expect(editor.transcriptWords).toEqual([{ text: "Hi", start: 0, end: 0.2 }]);
+    expect(editor.dirty).toBe(true);
   });
 });
 

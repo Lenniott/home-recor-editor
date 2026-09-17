@@ -1,10 +1,14 @@
 <script lang="ts">
+  import { getContext } from "svelte";
   import { editor, type TrackState } from "../editor.svelte";
   import { player } from "../player";
   import { computePeaksRange, type PeakColumns } from "../audio/peaks";
   import { laneLayout } from "../audio/laneLayout";
+  import { LANE_BOUNDS_KEY, trackIdsForPointerY, type LaneBounds } from "../audio/lanePointer";
   import { keptToSource, type TimelineSpan } from "../audio/timelineMap";
   import { theme } from "../theme";
+
+  const lanesOf = getContext<() => LaneBounds[]>(LANE_BOUNDS_KEY) ?? (() => [] as LaneBounds[]);
 
   /**
    * One lane, drawn for one track. Everything about *where* things sit on
@@ -512,10 +516,7 @@
       const t = xToSourceTime(e.offsetX);
       if (!drag.moved && Math.abs(e.offsetX - drag.startX) > CLICK_THRESHOLD_PX) drag.moved = true;
       if (drag.moved) {
-        const lanes = Array.from(document.querySelectorAll<HTMLElement>("[data-track-lane]"));
-        const origin = lanes.findIndex(lane => lane.dataset.trackLane === track.id);
-        const target = lanes.findIndex(lane => { const box = lane.getBoundingClientRect(); return e.clientY >= box.top && e.clientY <= box.bottom; });
-        const ids = target < 0 ? [track.id] : lanes.slice(Math.min(origin, target), Math.max(origin, target) + 1).map(lane => lane.dataset.trackLane!);
+        const ids = trackIdsForPointerY({ lanes: lanesOf(), originId: track.id, clientY: e.clientY });
         editor.setSelection(drag.anchorSec, t, ids);
       }
     }
@@ -575,6 +576,17 @@
       onpointerup={onPointerUp}
       onpointercancel={onPointerUp}
     ></canvas>
+    {#each track.markers as region, index}
+      {#if region.displayed}
+        {@const left = sourceTimeToX(region.displayed.start, "start")}
+        {@const right = sourceTimeToX(region.displayed.end, "end")}
+        <div
+          class="mark"
+          data-silence-mark={index}
+          style="left:{left}px;width:{Math.max(2, right - left)}px"
+        ></div>
+      {/if}
+    {/each}
   {:else}
     <div class="empty">
       <p>No recording loaded</p>
@@ -597,6 +609,13 @@
 
   .waveform.active {
     border-color: var(--amber);
+  }
+
+  .mark {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    pointer-events: none;
   }
 
   canvas {

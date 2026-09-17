@@ -2,6 +2,7 @@ import { adjacentMarkedRegion, fitWindow, type NavDirection } from "./audio/mark
 import { vadDetectOptions } from "./audio/sileroThresholds";
 import {
   applySilenceBuffer,
+  mergeOverlappingMarkers,
   moveMarker,
   silenceRegionsFromAmplitude,
   silenceRegionsFromSpeechSegments,
@@ -81,8 +82,6 @@ function sameTranscriptWords(a: TranscriptWord[], b: TranscriptWord[]): boolean 
  * this fraction of whichever region involved is shorter, it's clearly
  * intentional, so the two merge into one instead of just piling up.
  */
-const AUTO_MERGE_OVERLAP_FRACTION = 0.4;
-
 function overlapFraction(regions: RawMarker[], start: number, end: number): number {
   if (end <= start) return 0;
   let coveredSec = 0;
@@ -1088,36 +1087,12 @@ export class EditorState {
   }
 
   /**
-   * Call once a marker drag ends. If the dragged marker now overlaps a
-   * neighbor by more than `AUTO_MERGE_OVERLAP_FRACTION` of whichever of
-   * the two is shorter, they merge into one — drag mark B's start 4 of
-   * its own 10 seconds into mark A and the two become one marker, and
-   * the same holds dragging A into B. Below that threshold they're left
-   * overlapping as dragged, matching a manual Mark/Unmark decision
-   * instead of an automatic one.
+   * Call once a marker drag ends. Neighbors that overlap past the shared
+   * merge fraction become one marker — see `mergeOverlappingMarkers`.
+   * Below that threshold they stay as dragged. Select-drag never uses this.
    */
-  finishMarkerDrag(track: TrackState, markerIndex: number): void {
-    const dragged = track.rawMarkers[markerIndex];
-    if (!dragged) return;
-
-    let merged = dragged;
-    const survivors: RawMarker[] = [];
-    for (let i = 0; i < track.rawMarkers.length; i++) {
-      if (i === markerIndex) continue;
-      const other = track.rawMarkers[i];
-      const overlapStart = Math.max(merged.start, other.start);
-      const overlapEnd = Math.min(merged.end, other.end);
-      const overlapSec = Math.max(0, overlapEnd - overlapStart);
-      const shorterLengthSec = Math.min(merged.end - merged.start, other.end - other.start);
-      if (shorterLengthSec > 0 && overlapSec / shorterLengthSec >= AUTO_MERGE_OVERLAP_FRACTION) {
-        merged = { start: Math.min(merged.start, other.start), end: Math.max(merged.end, other.end) };
-      } else {
-        survivors.push(other);
-      }
-    }
-
-    if (merged === dragged) return;
-    track.rawMarkers = [...survivors, merged].sort((a, b) => a.start - b.start);
+  finishMarkerDrag(track: TrackState, _markerIndex: number): void {
+    track.rawMarkers = mergeOverlappingMarkers(track.rawMarkers);
   }
 
   /** Update the pending drag-to-select range. Order-independent; call repeatedly while dragging. */

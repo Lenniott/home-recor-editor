@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   applySilenceBuffer,
+  mergeOverlappingMarkers,
   moveMarker,
   silenceRegionsFromAmplitude,
   silenceRegionsFromSpeechSegments,
@@ -266,5 +267,22 @@ describe("moveMarker", () => {
 
     expect(moveMarker(raw, 100, "start", 5).start).toBeLessThanOrEqual(2);
     expect(moveMarker(raw, 100, "end", -5).end).toBeGreaterThanOrEqual(1);
+  });
+});
+
+describe("mergeOverlappingMarkers", () => {
+  it("merges two raw markers when overlap exceeds 0.4 of the shorter", () => {
+    // Lengths 2 and 2, overlap 1 → 0.5 of the shorter.
+    expect(mergeOverlappingMarkers([{ start: 1, end: 3 }, { start: 2, end: 4 }])).toEqual([
+      { start: 1, end: 4 },
+    ]);
+  });
+
+  it("leaves markers overlapping when the fraction is below 0.4", () => {
+    // Lengths 2 and 1.5, overlap 0.5 → 1/3 of the shorter.
+    expect(mergeOverlappingMarkers([{ start: 1, end: 3 }, { start: 2.5, end: 4 }])).toEqual([
+      { start: 1, end: 3 },
+      { start: 2.5, end: 4 },
+    ]);
   });
 });
