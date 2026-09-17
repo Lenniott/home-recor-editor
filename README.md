@@ -65,7 +65,7 @@ npm run test:e2e
 npm run tauri -- build --bundles app
 ```
 
-Playwright tests the Svelte interface in Chromium with synthetic audio and a mocked Tauri bridge. It covers one/two-lane dragging, immediate transcript selection, pending cuts, default/minimum window layout, Cmd zoom, cut-edge dragging, actual bundled VAD inference on synthesized speech/silence, and an OfflineAudioContext comparison of preview versus exported samples. It does **not** automate the native macOS webview, file dialogs, or whisper executable.
+Playwright tests the Svelte interface in Chromium with synthetic audio and a fake desktop adapter (virtual files and predetermined dialog answers). It covers File → Import/Open/Save/Export, one/two-lane dragging, immediate transcript selection, pending cuts, default/minimum window layout, Cmd zoom, cut-edge dragging, and silence-marker edge merge. Sample-level preview/export parity and bundled VAD inference live in `npm test`. It does **not** automate the native macOS webview, native file sheets, or whisper executable (`npm run test:whisper-smoke` with `WHISPER_SMOKE=1` when the sidecar is present).
 
 The Rust suite covers transcript parsing, cancellation/process cleanup, interrupted model cleanup, and path decoding. Native acceptance still includes running both real speaker recordings through the downloaded model offline, saving/reopening their transcripts, and listening to preview and exported audio in the packaged app.
 
