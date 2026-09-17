@@ -18,6 +18,16 @@ const MODEL_SHA1: &str = "137c40403d78fd54d454da0f9bd998f78703390c";
 const MODEL_URL: &str =
     "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin";
 const EVENT: &str = "transcription-progress";
+const PROGRESS_PHASES: &[&str] = &[
+    "downloading",
+    "verifying",
+    "detecting",
+    "transcribing",
+    "transcribing-cpu",
+    "complete",
+    "error",
+    "cancelled",
+];
 
 #[derive(Default)]
 pub struct Jobs(Mutex<Option<(String, Arc<JobControl>)>>);
@@ -139,6 +149,16 @@ pub fn cancel_transcription(app: tauri::AppHandle, job_id: String) {
     }
 }
 
+fn terminal_phase(cancelled: bool, result: &Result<Option<serde_json::Value>, String>) -> &'static str {
+    if cancelled {
+        "cancelled"
+    } else if result.is_ok() {
+        "complete"
+    } else {
+        "error"
+    }
+}
+
 fn finish(
     app: &tauri::AppHandle,
     id: &str,
@@ -148,12 +168,13 @@ fn finish(
     if let Ok(mut job) = app.state::<Jobs>().0.lock() {
         *job = None;
     }
-    if cancel.is_cancelled() {
-        emit(app, id, "cancelled", None, None, None);
+    let phase = terminal_phase(cancel.is_cancelled(), &result);
+    if phase == "cancelled" {
+        emit(app, id, phase, None, None, None);
     } else {
         match result {
-            Ok(result) => emit(app, id, "complete", Some(100.0), result, None),
-            Err(error) => emit(app, id, "error", None, None, Some(error)),
+            Ok(result) => emit(app, id, phase, Some(100.0), result, None),
+            Err(error) => emit(app, id, phase, None, None, Some(error)),
         }
     }
 }
@@ -412,7 +433,7 @@ pub fn start_transcription(
                 // Metal allocation. Keep the app and job alive, discard any
                 // partial output, and retry the exact same audio on CPU.
                 let _ = fs::remove_file(output.with_extension("json"));
-                emit(&app, &id, "transcribing-cpu", Some(0.0), None, None);
+                emit(&app, &id, PROGRESS_PHASES[4], Some(0.0), None, None);
                 run(
                     &app,
                     &id,
@@ -495,6 +516,35 @@ mod tests {
             assert!(verify_model(&temp.0.join("missing.bin")).is_err());
         }
         assert!(!path.exists());
+    }
+
+    #[test]
+    fn terminal_phases_for_success_cancel_and_error() {
+        assert_eq!(terminal_phase(false, &Ok(None)), "complete");
+        assert_eq!(terminal_phase(true, &Ok(None)), "cancelled");
+        assert_eq!(
+            terminal_phase(false, &Err("engine failed".into())),
+            "error"
+        );
+    }
+
+    #[test]
+    fn gpu_retry_emits_transcribing_cpu() {
+        assert!(should_retry_without_gpu("Metal failed"));
+        assert_eq!(PROGRESS_PHASES[4], "transcribing-cpu");
+        assert_eq!(
+            PROGRESS_PHASES,
+            [
+                "downloading",
+                "verifying",
+                "detecting",
+                "transcribing",
+                "transcribing-cpu",
+                "complete",
+                "error",
+                "cancelled",
+            ]
+        );
     }
 
     #[test]

@@ -117,6 +117,11 @@ mod tests {
     }
 
     #[test]
+    fn percent_decode_round_trips_non_ascii_path() {
+        assert_eq!(percent_decode("%2Ftmp%2F%E6%97%A5.wav").unwrap(), "/tmp/日.wav");
+    }
+
+    #[test]
     fn decodes_multi_byte_characters() {
         assert_eq!(percent_decode("%2Ftmp%2F%E6%97%A5.wav").unwrap(), "/tmp/日.wav");
     }

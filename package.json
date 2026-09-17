@@ -13,7 +13,8 @@
     "test:watch": "vitest",
     "tauri": "tauri",
     "build:whisper": "bash scripts/build-whisper.sh",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "test:whisper-smoke": "node scripts/whisper-smoke.mjs"
   },
   "license": "MIT",
   "dependencies": {
