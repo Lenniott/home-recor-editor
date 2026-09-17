@@ -1,5 +1,5 @@
 import { adjacentMarkedRegion, fitWindow, type NavDirection } from "./audio/markerNav";
-import { sileroThresholds } from "./audio/sileroThresholds";
+import { vadDetectOptions } from "./audio/sileroThresholds";
 import {
   applySilenceBuffer,
   moveMarker,
@@ -1000,14 +1000,10 @@ export class EditorState {
     // Commit only completed results; leave edits made during analysis intact.
     const audio = track.audioBuffer;
     try {
-      const { positive, negative } = sileroThresholds(track.settings.positiveSpeechThreshold);
       const segments = await vadDetector.detect(
         track.monoSamples,
         track.sampleRate,
-        {
-          positiveSpeechThreshold: positive,
-          negativeSpeechThreshold: negative,
-        },
+        vadDetectOptions(track.settings.positiveSpeechThreshold),
         (fraction) => {
           track.detectionProgress = fraction;
         },

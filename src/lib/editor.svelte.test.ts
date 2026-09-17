@@ -4,6 +4,7 @@ import { EditorState, type TrackState } from "./editor.svelte";
 import type { ProjectFile } from "./projectFile";
 import type { PodcastProject } from "./projectV2";
 import { vadDetector } from "./vadDetector";
+import { vadDetectOptions } from "./audio/sileroThresholds";
 
 const buffer = (duration = 10) =>
   ({ duration, sampleRate: 16000, length: duration * 16000, numberOfChannels: 1, getChannelData: () => new Float32Array(duration * 16000), copyFromChannel() {}, copyToChannel() {} }) as AudioBuffer;
@@ -657,5 +658,20 @@ describe("unified marker actions and zoom", () => {
     expect(e.viewStartSec).toBe(0);
     e.zoomView(.000001);
     expect(e.viewDurationSec).toBe(.2);
+  });
+});
+
+describe("VAD option parity", () => {
+  it("runSilenceDetection and transcribe pass the same vad options for one track", async () => {
+    const editor = new EditorState();
+    editor.loadAudio(buffer(), "a.wav", new Float32Array(160000), "/rec/a.wav", "a".repeat(64));
+    editor.setPositiveSpeechThreshold(0.7);
+    const detect = vi.spyOn(vadDetector, "detect").mockResolvedValue([]);
+    try {
+      await editor.runSilenceDetection();
+      expect(detect.mock.calls[0][2]).toEqual(vadDetectOptions(0.7));
+    } finally {
+      detect.mockRestore();
+    }
   });
 });

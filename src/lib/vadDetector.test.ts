@@ -1,4 +1,5 @@
 import { beforeEach, expect, it, vi } from "vitest";
+import { sileroThresholds } from "./audio/sileroThresholds";
 import { VadDetector } from "./vadDetector";
 
 class FakeWorker extends EventTarget {
@@ -10,7 +11,8 @@ class FakeWorker extends EventTarget {
   terminate() { this.terminated = true; }
   done(start: number) { this.dispatchEvent(new MessageEvent("message",{data:{type:"done",segments:[{start,end:start+1}]}})); }
 }
-const options = {positiveSpeechThreshold:.5,negativeSpeechThreshold:.35};
+const { positive, negative } = sileroThresholds(0.5);
+const options = { positiveSpeechThreshold: positive, negativeSpeechThreshold: negative };
 beforeEach(() => { FakeWorker.instances=[]; vi.stubGlobal("Worker",FakeWorker); });
 it("serializes consumers so each receives only its own result", async () => {
   const detector = new VadDetector();
