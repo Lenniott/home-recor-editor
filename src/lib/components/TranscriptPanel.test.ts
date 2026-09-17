@@ -15,7 +15,7 @@ const TranscriptionMock = vi.hoisted(() => class MockTranscription {
     { text: "Next", start: 4, end: 4.4 },
   ];
   modelChecked = true; modelReady = true; connected = true; busy = false;
-  error = null; completed = true; invalidated = false;
+  error: string | null = null; completed = true; invalidated = false;
   static latest: MockTranscription;
   constructor() { TranscriptionMock.latest = this; }
   onSettled: ((words: {text:string;start:number;end:number}[] | null) => void) | null = null;
@@ -219,16 +219,36 @@ describe("project-provided transcript", () => {
     };
     editor.applyProjectV2(project, "/x/restored.hre.json");
 
-    // The fake job runner's fields aren't reactive (unlike the real
-    // `Transcription`), so its DOM never re-renders off a later mutation —
-    // assert on the call itself rather than on rendered words.
     const restoreSpy = vi.spyOn(TranscriptionMock.prototype, "restore");
     target = document.createElement("div"); document.body.append(target);
     component = mount(TranscriptPanel, { target }); flushSync();
 
-    expect(restoreSpy).not.toHaveBeenCalled();
+    expect(restoreSpy).toHaveBeenCalledTimes(1);
+    expect(target.textContent).not.toMatch(/transcribe again/i);
     expect(target.querySelector("[data-word]")?.textContent).toBe("Restored");
     expect(editor.transcriptWords).toEqual(restoredWords);
+    restoreSpy.mockRestore();
+  });
+
+  it("after applyProjectV2 the transcript pane does not show transcribe-empty copy when words exist", async () => {
+    await unmount(component);
+    editor.loadAudio(
+      { duration: 10, sampleRate: 16000 } as AudioBuffer,
+      "restored.wav",
+      new Float32Array(160000),
+      "/x/restored.wav",
+      "a".repeat(64),
+    );
+    const restoredWords = [{ text: "Restored", start: 0, end: 0.6 }];
+    editor.applyTranscript(editor.tracks[0].id, restoredWords, "complete");
+    const restoreSpy = vi.spyOn(TranscriptionMock.prototype, "restore");
+    target = document.createElement("div"); document.body.append(target);
+    component = mount(TranscriptPanel, { target }); flushSync();
+
+    expect(restoreSpy).toHaveBeenCalledTimes(1);
+    expect(restoreSpy).toHaveBeenCalledWith(restoredWords, true);
+    expect(target.textContent).not.toMatch(/Try another recording or transcribe again/);
+    expect(target.querySelector("[data-word]")?.textContent).toBe("Restored");
     restoreSpy.mockRestore();
   });
 });
@@ -246,7 +266,49 @@ describe("conversation transcript", () => {
     expect(editor.selectionTrackIds).toEqual([editor.tracks[1].id]);
     expect(editor.playheadSec).toBe(1.2);
   });
+  it("keeps overlapping speaker runs in one paragraph each", () => {
+    editor.setSpeaker(editor.tracks[0], "Host");
+    editor.applyTranscript(
+      editor.tracks[0].id,
+      [
+        { text: "Hi,", start: 0.5, end: 0.9 },
+        { text: "this", start: 0.9, end: 1.5 },
+        { text: "is", start: 1.5, end: 2.2 },
+      ],
+      "complete",
+    );
+    editor.addTrack(
+      { duration: 10, sampleRate: 16000 } as AudioBuffer,
+      "guest.wav",
+      new Float32Array(160000),
+    );
+    editor.setSpeaker(editor.tracks[1], "Guest");
+    editor.applyTranscript(
+      editor.tracks[1].id,
+      [
+        { text: "Hi,", start: 0.8, end: 1.8 },
+        { text: "thanks", start: 1.8, end: 3.2 },
+      ],
+      "complete",
+    );
+    flushSync();
+    expect(
+      [...target.querySelectorAll(".words p")].map((paragraph) => ({
+        speaker: paragraph.querySelector(".speaker-label")?.childNodes[0]?.textContent?.trim(),
+        clock: paragraph.querySelector(".speaker-time")?.textContent,
+        text: [...paragraph.querySelectorAll("[data-word]")]
+          .map((word) => word.textContent)
+          .join(" "),
+      })),
+    ).toEqual([
+      { speaker: "Host", clock: "00:01", text: "Hi," },
+      { speaker: "Guest", clock: "00:01–00:02", text: "Hi," },
+      { speaker: "Host", clock: "00:01–00:02", text: "this is" },
+      { speaker: "Guest", clock: "00:02–00:03", text: "thanks" },
+    ]);
+  });
   it("runs every track in order and stores results on the job owner despite lane changes", () => {
+    editor.applyTranscript(editor.tracks[0].id, [], "missing");
     editor.addTrack({duration:10,sampleRate:16000} as AudioBuffer, "guest.wav", new Float32Array(160000));
     flushSync();
     button("Transcribe all").click(); flushSync();
@@ -271,6 +333,32 @@ describe("conversation transcript", () => {
     expect(apply).toHaveBeenCalledWith(editor.tracks[0].id, words, "complete");
     apply.mockRestore();
   });
+
+  it("transcribe all skips tracks already complete", () => {
+    editor.addTrack({ duration: 10, sampleRate: 16000 } as AudioBuffer, "guest.wav", new Float32Array(160000));
+    flushSync();
+    button("Transcribe all").click();
+    flushSync();
+    expect(TranscriptionMock.latest.transcribe).toHaveBeenCalledTimes(1);
+  });
+
+  it("a failed middle track still transcribes the following track", () => {
+    editor.applyTranscript(editor.tracks[0].id, [], "missing");
+    editor.addTrack({ duration: 10, sampleRate: 16000 } as AudioBuffer, "c.wav", new Float32Array(160000));
+    flushSync();
+    button("Transcribe all").click();
+    flushSync();
+    const runner = TranscriptionMock.latest;
+    runner.error = "engine failed";
+    runner.onSettled?.(null);
+    flushSync();
+    runner.error = null;
+    runner.onSettled?.([{ text: "C", start: 0, end: 0.2 }]);
+    flushSync();
+    expect(editor.tracks[0].transcriptStatus).toBe("missing");
+    expect(editor.tracks[1].transcriptStatus).toBe("complete");
+    expect(editor.tracks[1].transcriptWords).toEqual([{ text: "C", start: 0, end: 0.2 }]);
+  });
   it("discards stale results after the recording is replaced", () => {
     button("Transcribe all").click(); flushSync();
     const runner = TranscriptionMock.latest;
@@ -282,6 +370,15 @@ describe("conversation transcript", () => {
 
 describe("transcript silence gap", () => {
   it("updates paragraph breaks when the owning track's silence gap changes", () => {
+    editor.setTranscript(
+      [
+        { text: "Hello", start: 1, end: 1.5 },
+        { text: "world", start: 1.6, end: 2.2 },
+        { text: "Next", start: 4, end: 4.4 },
+      ],
+      "complete",
+    );
+    flushSync();
     expect(target.querySelectorAll(".words p")).toHaveLength(2);
     editor.setMinSilenceMs(2000); flushSync();
     expect(target.querySelectorAll(".words p")).toHaveLength(1);

@@ -4,11 +4,16 @@ vi.mock("@tauri-apps/api/core", () => ({ invoke: mocked.invoke }));
 vi.mock("@tauri-apps/api/event", () => ({ listen: vi.fn(async (_event, callback) => { mocked.listener = callback; return vi.fn(); }) }));
 vi.mock("./vadDetector", () => ({ vadDetector: { detect: vi.fn(async () => [{start:0,end:10}]) } }));
 import { vadDetector } from "./vadDetector";
+import { vadDetectOptions } from "./audio/sileroThresholds";
 import { Transcription } from "./transcription.svelte";
+import { TRANSCRIPTION_PROGRESS_PHASES } from "./transcriptionPhases";
 import { EditorState } from "./editor.svelte";
-import { selectedWordRange } from "./transcript";
+import { selectedWordRange, formatTranscriptClock } from "./transcript";
 
-const audio = () => ({ duration: 10, sampleRate: 16000, length: 160000, numberOfChannels: 1, getChannelData: () => new Float32Array(160000), copyFromChannel() {}, copyToChannel() {} }) as AudioBuffer;
+const audio = () => {
+  const data = new Float32Array(160000).fill(0.5);
+  return { duration: 10, sampleRate: 16000, length: 160000, numberOfChannels: 1, getChannelData: () => data, copyFromChannel() {}, copyToChannel() {} } as AudioBuffer;
+};
 const result = { transcription: [{ text: " hello", offsets: { from: 1000, to: 2000 } }] };
 function event(jobId: string, phase: string, extra = {}) { mocked.listener?.({ payload: { jobId, phase, percent: null, error: null, result: null, ...extra } }); }
 beforeEach(() => {
@@ -43,7 +48,31 @@ describe("transcription lifecycle", () => {
     state.setAudio(audio());
     expect(state.phase).toBe("cancelling");
     event(id, "complete", { result }); expect(state.words).toEqual([]); expect(state.busy).toBe(false);
-    await state.transcribe(); expect(state.busy).toBe(true);
+    await state.transcribe();     expect(state.busy).toBe(true);
+  });
+
+  it("ignores a progress event with an unknown phase and the same job id", async () => {
+    const state = new Transcription(); await state.init(); state.setAudio(audio());
+    await state.transcribe();
+    const id = mocked.invoke.mock.calls.find(c => c[0] === "start_transcription")![2].headers["x-job-id"];
+    const words = state.words;
+    expect(() => event(id, "not-a-real-phase")).not.toThrow();
+    expect(state.words).toBe(words);
+    expect(state.phase).toBe("transcribing");
+    expect(state.busy).toBe(true);
+  });
+
+  it("lists the canonical progress phases frontend and native share", () => {
+    expect(TRANSCRIPTION_PROGRESS_PHASES).toEqual([
+      "downloading",
+      "verifying",
+      "detecting",
+      "transcribing",
+      "transcribing-cpu",
+      "complete",
+      "error",
+      "cancelled",
+    ]);
   });
   it("reports download failure and supports retry, interruption and successful setup", async () => {
     mocked.invoke.mockResolvedValue(false);
@@ -162,6 +191,19 @@ describe("VAD gating", () => {
     event(id,"complete",{result:{transcription:[{text:"hello",offsets:{from:1000,to:1500}}]}});
     expect(state.words).toEqual([{text:"hello",start:5.8,end:6.3}]);
   });
+  it("restores Glad past a quiet hole even when VAD covers the whole take", async () => {
+    const samples = new Float32Array(160000);
+    samples.fill(0.5, 0, 3 * 16000);
+    samples.fill(0.5, 7 * 16000);
+    vi.mocked(vadDetector.detect).mockResolvedValue([{ start: 0, end: 10 }]);
+    const state = new Transcription();
+    await state.init();
+    state.setAudio(audio(), samples);
+    await state.transcribe({ positiveSpeechThreshold: 0.5, quietThresholdDb: -40, minSilenceMs: 1200 });
+    const id = mocked.invoke.mock.calls.find(c => c[0] === "start_transcription")![2].headers["x-job-id"];
+    event(id, "complete", { result: { transcription: [{ text: "Glad", offsets: { from: 3300, to: 3700 } }] } });
+    expect(formatTranscriptClock(state.words[0]!.start)).toBe("00:07");
+  });
   it("stops a VAD scan on cancel without starting transcription", async () => {
     let finish!: (value: {start:number;end:number}[]) => void;
     vi.mocked(vadDetector.detect).mockImplementation(() => new Promise(resolve => finish = resolve));
@@ -172,5 +214,28 @@ describe("VAD gating", () => {
     expect(signal.aborted).toBe(true);
     finish([{start:0,end:10}]); await job;
     expect(mocked.invoke.mock.calls.some(c => c[0] === "start_transcription")).toBe(false);
+  });
+
+  it("transcribe passes the track positiveSpeechThreshold to vad detect", async () => {
+    const state = new Transcription(); await state.init(); state.setAudio(audio());
+    await state.transcribe({ positiveSpeechThreshold: 0.7 });
+    expect(vi.mocked(vadDetector.detect).mock.calls[0][2]).toEqual(vadDetectOptions(0.7));
+  });
+
+  it("runSilenceDetection and transcribe pass the same vad options for one track", async () => {
+    const editor = new EditorState();
+    editor.loadAudio(audio(), "a.wav", new Float32Array(160000));
+    editor.setPositiveSpeechThreshold(0.7);
+    vi.mocked(vadDetector.detect).mockResolvedValue([]);
+    await editor.runSilenceDetection();
+    const fromDetect = vi.mocked(vadDetector.detect).mock.calls[0][2];
+    vi.mocked(vadDetector.detect).mockClear();
+    vi.mocked(vadDetector.detect).mockResolvedValue([]);
+    const state = new Transcription();
+    await state.init();
+    state.setAudio(editor.tracks[0].audioBuffer, editor.tracks[0].monoSamples);
+    await state.transcribe(editor.tracks[0].settings);
+    expect(vi.mocked(vadDetector.detect).mock.calls[0][2]).toEqual(fromDetect);
+    expect(fromDetect).toEqual(vadDetectOptions(0.7));
   });
 });

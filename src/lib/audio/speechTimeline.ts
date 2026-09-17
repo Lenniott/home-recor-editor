@@ -1,7 +1,16 @@
 import type { TranscriptWord } from "../transcript";
+import { subtractInterval } from "./silence";
 
 export interface SpeechSpan { start: number; end: number }
 export interface SpeechWindow extends SpeechSpan { offset: number }
+
+/** Drop quiet holes so Whisper never sees the pauses it would stamp words into. */
+export function excludeSilences(speech: SpeechSpan[], silences: SpeechSpan[]): SpeechSpan[] {
+  return silences.reduce(
+    (spans, silence) => subtractInterval(spans, silence.start, silence.end),
+    speech.filter(s => Number.isFinite(s.start) && Number.isFinite(s.end) && s.end > s.start),
+  );
+}
 
 /** Padded speech only, on the 16 kHz transcription frame grid. */
 export function speechWindows(segments: SpeechSpan[], duration: number, padding = .2): SpeechWindow[] {

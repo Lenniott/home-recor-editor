@@ -1,10 +1,12 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import { sileroThresholds } from "./audio/sileroThresholds";
+import { vadDetectOptions } from "./audio/sileroThresholds";
 import { vadDetector } from "./vadDetector";
 import { mixToMono } from "./audio/decode";
-import { speechWindows, restoreSpeechTimes, type SpeechWindow, type SpeechSpan } from "./audio/speechTimeline";
+import { silenceRegionsFromAmplitude } from "./audio/silence";
+import { speechWindows, restoreSpeechTimes, excludeSilences, type SpeechWindow, type SpeechSpan } from "./audio/speechTimeline";
 import { parseTranscript, type TranscriptWord } from "./transcript";
+import { isTranscriptionProgressPhase } from "./transcriptionPhases";
 
 interface Progress { jobId: string; phase: string; percent: number | null; result: unknown; error: string | null }
 
@@ -76,6 +78,7 @@ export class Transcription {
 
   private receive(event: Progress): void {
     if (event.jobId !== this.jobId || this.disposed) return;
+    if (!isTranscriptionProgressPhase(event.phase)) return;
     if (this.phase === "cancelling" && !["complete", "error", "cancelled"].includes(event.phase)) return;
     const cancelled = this.phase === "cancelling" || event.phase === "cancelled";
     if (["complete", "error", "cancelled"].includes(event.phase)) {
@@ -109,7 +112,7 @@ export class Transcription {
     catch (e) { this.fail(e); }
   }
 
-  async transcribe(settings: {positiveSpeechThreshold: number} = {positiveSpeechThreshold: .5}): Promise<void> {
+  async transcribe(settings: {positiveSpeechThreshold: number; quietThresholdDb?: number; minSilenceMs?: number} = {positiveSpeechThreshold: .5}): Promise<void> {
     const audio = this.audio;
     if (!audio || this.busy || !this.modelReady) return;
     const id = crypto.randomUUID();
@@ -126,14 +129,16 @@ export class Transcription {
       // immediately before the worker's structured-clone copy can exhaust
       // WebKit's process memory on long podcast recordings and reload the UI.
       const analysisSamples = this.analysisSamples ?? mixToMono(audio);
-      const { positive, negative } = sileroThresholds(settings.positiveSpeechThreshold);
-      const speech = await vadDetector.detect(analysisSamples, audio.sampleRate, {
-        positiveSpeechThreshold: positive,
-        negativeSpeechThreshold: negative,
-      }, fraction => { if (this.jobId === id) this.percent = fraction*100; }, this.vadAbort.signal);
+      const speech = await vadDetector.detect(analysisSamples, audio.sampleRate, vadDetectOptions(settings.positiveSpeechThreshold), fraction => { if (this.jobId === id) this.percent = fraction*100; }, this.vadAbort.signal);
       if (this.jobId !== id || this.audio !== audio || this.disposed) return;
-      this.speech = speech;
-      this.windows = speechWindows(speech, audio.duration);
+      const quiet = silenceRegionsFromAmplitude(
+        analysisSamples,
+        audio.sampleRate,
+        settings.quietThresholdDb ?? -40,
+        settings.minSilenceMs ?? 1200,
+      );
+      this.speech = excludeSilences(speech, quiet);
+      this.windows = speechWindows(this.speech, audio.duration);
       this.transcriptionDuration = this.windows.reduce((sum, span) => sum+span.end-span.start,0);
       if (!this.windows.length) {
         this.receive({jobId:id,phase:"complete",percent:100,result:{transcription:[]},error:null});

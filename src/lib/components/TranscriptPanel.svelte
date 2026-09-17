@@ -4,7 +4,12 @@
   import { player } from "$lib/player";
   import { fitWindow } from "$lib/audio/markerNav";
   import { Transcription } from "$lib/transcription.svelte";
-  import { selectedWordRange, wordsAtOffsets } from "$lib/transcript";
+  import {
+    conversationParagraphs,
+    formatParagraphClock,
+    visualWordRange,
+    wordsAtOffsets,
+  } from "$lib/transcript";
   import Button from "$lib/components/baseline/Button.svelte";
 
   let {
@@ -26,6 +31,15 @@
       )
       .sort((a, b) => a.start - b.start || a.trackId.localeCompare(b.trackId)),
   );
+  const turns = $derived(
+    conversationParagraphs(
+      words,
+      (trackId) =>
+        (editor.tracks.find((track) => track.id === trackId)?.settings
+          .minSilenceMs ?? 1200) / 1000,
+    ),
+  );
+  const paragraphs = $derived(turns.map((turn) => turn.indices));
   function nextTrack(): void {
     running = queue.shift() ?? null;
     if (!running || !editor.tracks.includes(running)) {
@@ -37,9 +51,11 @@
     transcript.setAudio(runningAudio, running.monoSamples);
     void transcript.transcribe(running.settings);
   }
-  function transcribeAll(): void {
+  function transcribeAll(force = false): void {
     if (transcript.busy) return;
-    queue = [...editor.tracks];
+    queue = force
+      ? [...editor.tracks]
+      : editor.tracks.filter((track) => track.transcriptStatus !== "complete");
     nextTrack();
   }
   function cancelAll(): void {
@@ -54,13 +70,27 @@
       running.audioBuffer === runningAudio
     ) {
       editor.applyTranscript(running.id, result, "complete");
+    } else if (!result && transcript.error && running && editor.tracks.includes(running)) {
+      editor.applyTranscript(running.id, running.transcriptWords, "missing");
+    } else if (!result) {
+      queue = [];
     }
-    if (!result) queue = [];
     nextTrack();
   };
   $effect(() => {
     const tracks = editor.tracks;
     if (running && !tracks.includes(running)) untrack(cancelAll);
+  });
+  $effect(() => {
+    const token = editor.transcriptRestoreToken;
+    const track = editor.activeTrack;
+    untrack(() => {
+      if (!track) return;
+      transcript.setAudio(track.audioBuffer, track.monoSamples);
+      if (track.transcriptWords.length)
+        transcript.restore(track.transcriptWords, track.transcriptStatus === "complete");
+    });
+    void token;
   });
   let root: HTMLDivElement = $state()!;
   let anchor = 0;
@@ -156,25 +186,6 @@
       previousCurrent = active;
     });
   });
-  const paragraphs = $derived.by(() => {
-    const groups: number[][] = [];
-    let spokenUntil = -Infinity;
-    words.forEach((word, index) => {
-      const previous = words[index - 1];
-      if (
-        !previous ||
-        previous.trackId !== word.trackId ||
-        word.start - spokenUntil >
-          (editor.tracks.find((t) => t.id === word.trackId)?.settings
-            .minSilenceMs ?? 1200) /
-            1000
-      )
-        groups.push([]);
-      groups[groups.length - 1].push(index);
-      spokenUntil = Math.max(spokenUntil, word.end);
-    });
-    return groups;
-  });
 
   onMount(() => {
     void transcript.init();
@@ -211,8 +222,13 @@
     reveal = true,
     seek = false,
   ): void {
-    const range = selectedWordRange(words, first, last);
-    if (!range) return;
+    const indices = visualWordRange(paragraphs, first, last);
+    const selectedWords = indices.map((index) => words[index]);
+    if (!selectedWords.length) return;
+    const range = {
+      start: Math.min(...selectedWords.map((word) => word.start)),
+      end: Math.max(...selectedWords.map((word) => word.end)),
+    };
     anchor = first;
     focus = last;
     const filterChanged =
@@ -220,10 +236,6 @@
     editor.withoutHistory(() => {
       if (editor.viewFilter !== "all") editor.setViewFilter("all");
       editor.setPreview("original");
-      const selectedWords = words.slice(
-        Math.min(first, last),
-        Math.max(first, last) + 1,
-      );
       editor.selectTranscriptWords(selectedWords);
       if (seek) editor.setActiveTrack(words[last].trackId);
       if (reveal) {
@@ -376,13 +388,15 @@
 
   function keydown(event: KeyboardEvent): void {
     if (!words.length || event.metaKey || event.ctrlKey || event.altKey) return;
+    const order = paragraphs.flat();
+    const position = Math.max(0, order.indexOf(focus));
     let next: number;
     if (event.key === "ArrowRight" || event.key === "ArrowDown")
-      next = Math.min(focus + 1, words.length - 1);
+      next = order[Math.min(position + 1, order.length - 1)];
     else if (event.key === "ArrowLeft" || event.key === "ArrowUp")
-      next = Math.max(focus - 1, 0);
-    else if (event.key === "Home") next = 0;
-    else if (event.key === "End") next = words.length - 1;
+      next = order[Math.max(position - 1, 0)];
+    else if (event.key === "Home") next = order[0];
+    else if (event.key === "End") next = order[order.length - 1];
     else if (event.key === "Enter") next = focus;
     else return;
     event.preventDefault();
@@ -436,7 +450,9 @@
       <Button
         size="tool"
         variant="secondary"
-        onclick={transcribeAll}
+        onclick={() =>
+          transcribeAll(editor.tracks.every((track) => track.transcriptStatus === "complete"))
+        }
         disabled={!editor.hasAudio || transcript.busy}
       >
         {words.length ? "Transcribe all again" : "Transcribe all tracks"}
@@ -512,10 +528,14 @@
       aria-describedby="transcript-help"
       onkeydown={keydown}
     >
-      {#each paragraphs as paragraph}
+      {#each turns as turn (turn.indices[0])}
         <p>
-          <strong class="speaker-label">{words[paragraph[0]].speaker}</strong
-          >{#each paragraph as index}<span
+          <strong class="speaker-label"
+            >{words[turn.indices[0]].speaker}
+            <span class="speaker-time"
+              >{formatParagraphClock(turn.start, turn.end)}</span
+            ></strong
+          >{#each turn.indices as index (index)}<span
               data-word={index}
               class:selected={editor.selectionTrackIds.includes(
                 words[index].trackId,
@@ -582,10 +602,17 @@
     cursor: text;
   }
   .speaker-label {
-    display: block;
+    display: flex;
+    align-items: baseline;
+    gap: 0.5rem;
     font-size: 0.72rem;
     color: var(--cream-dim);
     user-select: none;
+  }
+  .speaker-time {
+    font-weight: 500;
+    opacity: 0.75;
+    font-variant-numeric: tabular-nums;
   }
   .words p {
     line-height: 1.9;
