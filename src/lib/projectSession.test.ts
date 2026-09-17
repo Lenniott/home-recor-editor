@@ -1,6 +1,7 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { EditorState } from "./editor.svelte";
-import { openRecordings, saveProject } from "./projectSession";
+import { openProjectFile, openRecordings, saveProject, scheduleAutosave } from "./projectSession";
+import { serializeProject } from "./projectFile";
 import {
   DEFAULT_SETTINGS,
   serializePodcastProject,
@@ -309,5 +310,202 @@ describe("saveProject", () => {
     expect(result.error).toBe(null);
     expect(result.projectPath).toBe("/rec/a.hre.json");
     expect(desktop.files.get("/rec/a.hre.json")).toContain("Sam");
+  });
+});
+
+describe("scheduleAutosave", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("does not autosave until the session has a project path", async () => {
+    vi.useFakeTimers();
+    const editor = new EditorState();
+    const desktop = memoryDesktop({
+      audio: { "/rec/a.wav": new Uint8Array([0]) },
+      missingText: ["/rec/a.hre.json"],
+    });
+    await openRecordings({ files: ["/rec/a.wav"], desktop, editor });
+    editor.setSelection(1, 2);
+    editor.markSelection();
+    const writes: string[] = [];
+    const counting = {
+      ...desktop,
+      async writeText(path: string, contents: string) {
+        writes.push(path);
+        return desktop.writeText(path, contents);
+      },
+    };
+    scheduleAutosave({ editor, desktop: counting, blockedSavePath: null, delayMs: 100 });
+    await vi.advanceTimersByTimeAsync(500);
+    expect(writes).toHaveLength(0);
+  });
+
+  it("autosaves after first save once an edit settles", async () => {
+    vi.useFakeTimers();
+    const editor = new EditorState();
+    const desktop = memoryDesktop({
+      audio: { "/rec/a.wav": new Uint8Array([0]) },
+      missingText: ["/rec/a.hre.json"],
+    });
+    await openRecordings({ files: ["/rec/a.wav"], desktop, editor });
+    await saveProject({ editor, desktop, blockedSavePath: null });
+    editor.setSelection(1, 2);
+    editor.markSelection();
+    const writes: string[] = [];
+    const counting = {
+      ...desktop,
+      async writeText(path: string, contents: string) {
+        writes.push(path);
+        return desktop.writeText(path, contents);
+      },
+    };
+    scheduleAutosave({ editor, desktop: counting, blockedSavePath: null, delayMs: 100 });
+    await vi.advanceTimersByTimeAsync(100);
+    expect(writes).toEqual(["/rec/a.hre.json"]);
+  });
+});
+
+describe("openProjectFile", () => {
+  const sha256 = "6e340b9cffb37a989ca544e6bb780a2c78901d3fb33738768511a30617afa01d";
+
+  it("leaves the current session unchanged when Locate is cancelled", async () => {
+    const editor = new EditorState();
+    const desktop = memoryDesktop({
+      audio: { "/rec/a.wav": new Uint8Array([0]) },
+      missingText: ["/rec/a.hre.json"],
+    });
+    await openRecordings({ files: ["/rec/a.wav"], desktop, editor });
+    editor.setSelection(1, 2);
+    editor.markSelection();
+
+    const project: PodcastProject = {
+      version: 2,
+      name: "moved",
+      sampleRate: 16000,
+      tracks: [
+        {
+          id: "t1",
+          speaker: "Alex",
+          source: { path: "gone.wav", name: "gone.wav", sha256, duration: 10 },
+          settings: { ...DEFAULT_SETTINGS },
+          detected: [],
+          manualSilences: [{ start: 4, end: 5 }],
+          restored: [],
+          transcript: { status: "missing", words: [] },
+        },
+      ],
+      cuts: [],
+      dismissed: [],
+      workspace: {
+        activeTrackId: "t1",
+        preview: "edited",
+        tab: "transcript",
+        sidebarWidth: 320,
+        sidebarOpen: true,
+        viewStartSec: 0,
+        viewDurationSec: 10,
+        inSec: 0,
+        outSec: 10,
+        loop: false,
+        viewFilter: "all",
+        muteMarked: true,
+      },
+    };
+    desktop.files.set("/proj/moved.hre.json", serializePodcastProject(project));
+
+    const result = await openProjectFile({
+      path: "/proj/moved.hre.json",
+      desktop,
+      editor,
+      locate: async () => null,
+    });
+
+    expect(result.tracks[0].rawMarkers).toEqual([{ start: 1, end: 2 }]);
+    expect(result.error).toContain("Couldn't locate");
+  });
+
+  it("openProjectFile rejects a version-1 document with a message to import the recording", async () => {
+    const editor = new EditorState();
+    const desktop = memoryDesktop({
+      audio: { "/rec/a.wav": new Uint8Array([0]) },
+      missingText: ["/rec/a.hre.json"],
+    });
+    await openRecordings({ files: ["/rec/a.wav"], desktop, editor });
+    editor.setSelection(3, 4);
+    editor.markSelection();
+    desktop.files.set(
+      "/rec/legacy.hre.json",
+      serializeProject({
+        audioFileName: "a.wav",
+        durationSec: 10,
+        rawMarkers: [{ start: 1, end: 2 }],
+        inSec: 0,
+        outSec: 10,
+        settings: { ...DEFAULT_SETTINGS },
+        viewStartSec: 0,
+        viewDurationSec: 10,
+      }),
+    );
+
+    const result = await openProjectFile({
+      path: "/rec/legacy.hre.json",
+      desktop,
+      editor,
+      locate: async () => null,
+    });
+
+    expect(result.tracks[0].rawMarkers).toEqual([{ start: 3, end: 4 }]);
+    expect(result.error).toMatch(/import/i);
+  });
+});
+
+describe("legacy companion import", () => {
+  it("refuses a legacy companion whose duration does not match the recording", async () => {
+    const editor = new EditorState();
+    const desktop = memoryDesktop({
+      audio: { "/rec/a.wav": new Uint8Array([0]) },
+      text: {
+        "/rec/a.hre.json": serializeProject({
+          audioFileName: "a.wav",
+          durationSec: 8,
+          rawMarkers: [{ start: 1, end: 2 }],
+          inSec: 0,
+          outSec: 8,
+          settings: { ...DEFAULT_SETTINGS },
+          viewStartSec: 0,
+          viewDurationSec: 8,
+        }),
+      },
+    });
+    const result = await openRecordings({ files: ["/rec/a.wav"], desktop, editor });
+    expect(result.tracks[0].rawMarkers).toEqual([]);
+    expect(result.error).toBe("Legacy duration mismatches require the original recording.");
+  });
+
+  it("restores matching-duration legacy marks and upgrades on save", async () => {
+    const editor = new EditorState();
+    const desktop = memoryDesktop({
+      audio: { "/rec/a.wav": new Uint8Array([0]) },
+      text: {
+        "/rec/a.hre.json": serializeProject({
+          audioFileName: "a.wav",
+          durationSec: 10,
+          rawMarkers: [{ start: 1, end: 2 }],
+          inSec: 0,
+          outSec: 10,
+          settings: { ...DEFAULT_SETTINGS },
+          viewStartSec: 0,
+          viewDurationSec: 10,
+        }),
+      },
+    });
+    const opened = await openRecordings({ files: ["/rec/a.wav"], desktop, editor });
+    expect(opened.error).toBe(null);
+    expect(opened.tracks[0].rawMarkers).toEqual([{ start: 1, end: 2 }]);
+    const saved = await saveProject({ editor, desktop, blockedSavePath: null });
+    expect(saved.error).toBe(null);
+    expect(desktop.files.get("/rec/a.hre.json")).toContain('"version": 2');
+    expect(desktop.files.get("/rec/a.hre.json")).toContain("sha256");
   });
 });

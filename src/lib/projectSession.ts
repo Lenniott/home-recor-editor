@@ -1,8 +1,8 @@
 import { mixToMono } from "./audio/decode";
 import { MAX_TRACKS, type EditorState } from "./editor.svelte";
 import { sha256Hex } from "./hash";
-import { sidecarPath } from "./projectFile";
-import { parsePodcastProject, serializePodcastProject } from "./projectV2";
+import { parseProjectFile, sidecarPath } from "./projectFile";
+import { parsePodcastProject, resolveSourcePath, serializePodcastProject } from "./projectV2";
 
 /**
  * Desktop adapter at the project-session seam: files and decode. Tests
@@ -127,8 +127,21 @@ export async function openRecordings({
   try {
     const text = await desktop.readText(companionPath);
     if (text) {
-      const project = parsePodcastProject(text);
-      editor.applyProjectV2(project, companionPath);
+      try {
+        const project = parsePodcastProject(text);
+        editor.applyProjectV2(project, companionPath);
+      } catch (err) {
+        const legacy = parseProjectFile(text);
+        if (!legacy) throw err;
+        if (Math.abs(legacy.durationSec - first.buffer.duration) > 0.01) {
+          return sessionResult(
+            editor,
+            "Legacy duration mismatches require the original recording.",
+            null,
+          );
+        }
+        editor.applyLegacyProject(legacy, companionPath);
+      }
     }
   } catch (err) {
     return sessionResult(
@@ -187,4 +200,126 @@ export async function saveProject({
   editor.projectPath = path;
   editor.markSaved(revision);
   return { error: null as string | null, projectPath: path };
+}
+
+export const AUTOSAVE_DELAY_MS = 1500;
+
+export function shouldAutosave({
+  dirty,
+  projectPath,
+  saving = false,
+  failed = false,
+  loading = false,
+}: {
+  dirty: boolean;
+  projectPath: string | null;
+  saving?: boolean;
+  failed?: boolean;
+  loading?: boolean;
+}): boolean {
+  return Boolean(dirty && projectPath && !saving && !failed && !loading);
+}
+
+export function scheduleAutosave({
+  editor,
+  desktop,
+  blockedSavePath,
+  delayMs = AUTOSAVE_DELAY_MS,
+  saving = false,
+  failed = false,
+  loading = false,
+}: {
+  editor: EditorState;
+  desktop: DesktopAdapter;
+  blockedSavePath: string | null;
+  delayMs?: number;
+  saving?: boolean;
+  failed?: boolean;
+  loading?: boolean;
+}): ReturnType<typeof setTimeout> | null {
+  if (
+    !shouldAutosave({
+      dirty: editor.dirty,
+      projectPath: editor.projectPath,
+      saving,
+      failed,
+      loading,
+    })
+  ) {
+    return null;
+  }
+  return setTimeout(() => {
+    void saveProject({ editor, desktop, blockedSavePath });
+  }, delayMs);
+}
+
+export type LocateRecording = (name: string) => Promise<string | null>;
+
+export async function openProjectFile({
+  path,
+  desktop,
+  editor,
+  locate,
+}: {
+  path: string;
+  desktop: DesktopAdapter;
+  editor: EditorState;
+  locate: LocateRecording;
+}) {
+  const text = await desktop.readText(path);
+  if (!text) {
+    return sessionResult(editor, "Project file not found.", null);
+  }
+  let project;
+  try {
+    project = parsePodcastProject(text);
+  } catch {
+    if (parseProjectFile(text)) {
+      return sessionResult(
+        editor,
+        "This is a legacy project file. Import the recording beside it to restore marks.",
+        null,
+      );
+    }
+    return sessionResult(editor, "Not a valid project file.", null);
+  }
+
+  const loaded: Awaited<ReturnType<typeof readRecording>>[] = [];
+  for (const track of project.tracks) {
+    const resolved = resolveSourcePath(path, track.source.path);
+    try {
+      loaded.push(await readRecording(resolved, desktop));
+    } catch {
+      const relocated = await locate(track.source.name);
+      if (!relocated) {
+        return sessionResult(
+          editor,
+          `Couldn't locate "${track.source.name}". The current project has not been replaced.`,
+          null,
+        );
+      }
+      loaded.push(await readRecording(relocated, desktop));
+    }
+  }
+
+  for (let i = 0; i < loaded.length; i++) {
+    if (
+      loaded[i].sha256 !== project.tracks[i].source.sha256 ||
+      Math.abs(loaded[i].buffer.duration - project.tracks[i].source.duration) > 0.01
+    ) {
+      return sessionResult(
+        editor,
+        `Source "${project.tracks[i].speaker}" differs from the saved recording. Relink the original source to preserve its timings. The current project has not been replaced.`,
+        null,
+      );
+    }
+  }
+
+  const [first, ...rest] = loaded;
+  editor.loadAudio(first.buffer, first.name, first.mono, first.path, first.sha256);
+  for (const extra of rest) {
+    editor.addTrack(extra.buffer, extra.name, extra.mono, extra.path, extra.sha256);
+  }
+  editor.applyProjectV2(project, path);
+  return sessionResult(editor, null, null);
 }
