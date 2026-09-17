@@ -10,12 +10,13 @@
   import IconPlay from "../icons/IconPlay.svelte";
   import IconRedo from "../icons/IconRedo.svelte";
   import IconScissors from "../icons/IconScissors.svelte";
+  import IconClip from "../icons/IconClip.svelte";
   import IconSilence from "../icons/IconSilence.svelte";
   import IconUndo from "../icons/IconUndo.svelte";
   import IconZoom from "../icons/IconZoom.svelte";
   import IconSettings from "../icons/IconSettings.svelte";
 
-  export type MarkerType = "silence" | "cut";
+  export type MarkerType = "silence" | "cut" | "clip";
   export type ViewMode = "both" | "transcript" | "audio";
 
   let {
@@ -224,6 +225,19 @@
       onclick={() => (markerType = "cut")}
     >
       {#snippet glyph()}<IconScissors />{/snippet}
+    </Button>
+    <Button
+      size="tool"
+      variant="secondary"
+      icon="left"
+      label={false}
+      tooltip
+      title="Clip"
+      aria-label="Clip"
+      aria-pressed={markerType === "clip"}
+      onclick={() => (markerType = "clip")}
+    >
+      {#snippet glyph()}<IconClip />{/snippet}
     </Button>
     {#if hasSelection}
       <Button

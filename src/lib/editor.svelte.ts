@@ -45,6 +45,7 @@ export type SelectionOverlap = "unmarked" | "marked" | "mixed";
  * `EditorState.timelineSpans` / `mutedIntervalsFor`.
  */
 export type PreviewMode = "original" | "edited";
+export type MarkerAction = "silence" | "cut" | "clip";
 
 export type { ViewFilter };
 export type { Range };
@@ -114,6 +115,8 @@ export class TrackState {
   settings: SilenceSettings = $state({ ...DEFAULT_SETTINGS });
   /** This track's silence regions — muted in place during an edited preview, never removing time. */
   rawMarkers: RawMarker[] = $state([]);
+  /** Per-track clip spans for export — never mute or cut playback. */
+  rawClips: RawMarker[] = $state([]);
 
   isDetectingSilence: boolean = $state(false);
   detectionProgress: number = $state(0);
@@ -146,6 +149,7 @@ export class TrackState {
     this.sourceSha256 = sha256;
     this.monoSamples = monoSamples;
     this.rawMarkers = [];
+    this.rawClips = [];
     this.detectionProgress = 0;
     this.detectionError = null;
     this.transcriptWords = [];
@@ -169,6 +173,7 @@ export class TrackState {
     detected: this.rawMarkers.map((r) => ({ start: r.start, end: r.end })),
     manualSilences: [],
     restored: [],
+    clips: this.rawClips.map((r) => ({ start: r.start, end: r.end })),
     transcript: { status: "missing", words: [] },
   }));
 
@@ -188,6 +193,7 @@ export class TrackState {
 /** A track's undoable document state — see `SessionSnapshot`. */
 interface TrackSnapshot {
   rawMarkers: RawMarker[];
+  rawClips: RawMarker[];
   settings: SilenceSettings;
   speaker: string;
 }
@@ -226,6 +232,7 @@ function cloneSnapshot(snapshot: SessionSnapshot): SessionSnapshot {
     selectionRanges: snapshot.selectionRanges.map(r => ({...r})),
     tracks: snapshot.tracks.map((track) => ({
       rawMarkers: track.rawMarkers.map((r) => ({ ...r })),
+      rawClips: track.rawClips.map((r) => ({ ...r })),
       settings: { ...track.settings },
       speaker: track.speaker,
     })),
@@ -270,7 +277,8 @@ function snapshotsEqual(a: SessionSnapshot, b: SessionSnapshot): boolean {
       (track, i) =>
         track.speaker === b.tracks[i].speaker &&
         settingsEqual(track.settings, b.tracks[i].settings) &&
-        regionsEqual(track.rawMarkers, b.tracks[i].rawMarkers),
+        regionsEqual(track.rawMarkers, b.tracks[i].rawMarkers) &&
+        regionsEqual(track.rawClips, b.tracks[i].rawClips),
     )
   );
 }
@@ -344,7 +352,7 @@ export class EditorState {
   selectionTrackIds: string[] = $state([]);
   selectionRanges: { trackId: string; start: number; end: number }[] = $state([]);
   cutScopePreview = $state(false);
-  markerAction: "silence" | "cut" = $state("silence");
+  markerAction: MarkerAction = $state("silence");
   readonly selectionTracks = $derived(this.tracks.filter(t => this.selectionTrackIds.includes(t.id)));
   readonly selectionLabel = $derived(this.selectionTracks.map(t => t.speaker).join(" + "));
   readonly detectingAny = $derived(this.tracks.some(t => t.isDetectingSilence));
@@ -394,6 +402,9 @@ export class EditorState {
   }
   get rawMarkers(): RawMarker[] {
     return this.activeTrack?.rawMarkers ?? [];
+  }
+  get rawClips(): RawMarker[] {
+    return this.activeTrack?.rawClips ?? [];
   }
   get markers(): Marker[] {
     return this.activeTrack?.markers ?? [];
@@ -497,6 +508,16 @@ export class EditorState {
     return "mixed";
   });
 
+  /**
+   * Regions the Mark / Unmark / [ ] / waveform-edge controls currently
+   * act on — silences, shared cuts, or clips, matching `markerAction`.
+   */
+  readonly actionIntervals: DisplayedInterval[] = $derived.by(() => {
+    if (this.markerAction === "cut") return this.cuts;
+    if (this.markerAction === "clip") return this.activeTrack?.rawClips ?? [];
+    return this.markedIntervals;
+  });
+
   /** What a track actually silences during playback/export: its own marks, and nothing at all in the original preview. */
   mutedIntervalsFor(track: TrackState): DisplayedInterval[] {
     return this.preview === "original" ? [] : track.markedIntervals;
@@ -506,6 +527,7 @@ export class EditorState {
     return {
       tracks: this.tracks.map((track) => ({
         rawMarkers: track.rawMarkers.map((r) => ({ ...r })),
+        rawClips: track.rawClips.map((r) => ({ ...r })),
         settings: { ...track.settings },
         speaker: track.speaker,
       })),
@@ -532,6 +554,7 @@ export class EditorState {
       const target = this.tracks[index];
       if (!target) return;
       target.rawMarkers = track.rawMarkers;
+      target.rawClips = track.rawClips;
       target.settings = track.settings;
       target.speaker = track.speaker;
     });
@@ -821,6 +844,7 @@ export class EditorState {
       track.speaker = reconciled.speaker;
       track.settings = { ...reconciled.settings };
       track.rawMarkers = trackSilences(reconciled).map((r) => ({ start: r.start, end: r.end }));
+      track.rawClips = normalize(reconciled.clips, track.durationSec).map((r) => ({ start: r.start, end: r.end }));
       track.transcriptWords = reconciled.transcript.words.map((w) => ({ ...w }));
       track.transcriptStatus = reconciled.transcript.status;
     });
@@ -1093,6 +1117,38 @@ export class EditorState {
     track.rawMarkers = [...survivors, merged].sort((a, b) => a.start - b.start);
   }
 
+  /** Drag a clip edge. No silence buffer — the displayed span is the raw span. */
+  moveClip(track: TrackState, clipIndex: number, edge: "start" | "end", sec: number): void {
+    const raw = track.rawClips[clipIndex];
+    if (!raw) return;
+    const clamped = clamp(sec, 0, track.durationSec);
+    const next = [...track.rawClips];
+    next[clipIndex] = moveMarker(raw, 0, edge, clamped);
+    track.rawClips = next;
+  }
+
+  finishClipDrag(track: TrackState, clipIndex: number): void {
+    const dragged = track.rawClips[clipIndex];
+    if (!dragged) return;
+    let merged = dragged;
+    const survivors: RawMarker[] = [];
+    for (let i = 0; i < track.rawClips.length; i++) {
+      if (i === clipIndex) continue;
+      const other = track.rawClips[i];
+      const overlapStart = Math.max(merged.start, other.start);
+      const overlapEnd = Math.min(merged.end, other.end);
+      const overlapSec = Math.max(0, overlapEnd - overlapStart);
+      const shorterLengthSec = Math.min(merged.end - merged.start, other.end - other.start);
+      if (shorterLengthSec > 0 && overlapSec / shorterLengthSec >= AUTO_MERGE_OVERLAP_FRACTION) {
+        merged = { start: Math.min(merged.start, other.start), end: Math.max(merged.end, other.end) };
+      } else {
+        survivors.push(other);
+      }
+    }
+    if (merged === dragged) return;
+    track.rawClips = [...survivors, merged].sort((a, b) => a.start - b.start);
+  }
+
   /** Update the pending drag-to-select range. Order-independent; call repeatedly while dragging. */
   setSelection(startSec: number, endSec: number, trackIds: string[] = this.activeTrack ? [this.activeTrack.id] : []): void {
     this.cutScopePreview = this.markerAction === "cut";
@@ -1160,21 +1216,57 @@ export class EditorState {
     });
   }
 
+  markClipSelection(track: TrackState | null = null): void {
+    this.commitEdit(() => {
+      const range = this.selectionRange;
+      if (!range) return;
+      for (const target of track ? [track] : this.selectionTracks) {
+        const span = track ? range : this.selectionFor(target);
+        if (span) target.rawClips = unionInterval(target.rawClips, span.start, span.end);
+      }
+      this.clearSelection();
+    });
+  }
+
+  unmarkClipSelection(track: TrackState | null = null): void {
+    this.commitEdit(() => {
+      const range = this.selectionRange;
+      if (!range) return;
+      for (const target of track ? [track] : this.selectionTracks) {
+        const span = track ? range : this.selectionFor(target);
+        if (span) target.rawClips = subtractInterval(target.rawClips, span.start, span.end);
+      }
+      this.clearSelection();
+    });
+  }
+
   readonly actionOverlap: SelectionOverlap | null = $derived.by(() => {
     if (this.markerAction === "silence") return this.selectionOverlap;
     const range = this.selectionRange;
     if (!range) return null;
+    if (this.markerAction === "clip") {
+      const fractions = this.selectionTracks.map((t) => {
+        const span = this.selectionFor(t) ?? range;
+        return overlapFraction(t.rawClips, span.start, span.end);
+      });
+      const fraction = fractions.length ? fractions.reduce((a, b) => a + b, 0) / fractions.length : 0;
+      if (fraction <= 0) return "unmarked";
+      if (fraction >= 1) return "marked";
+      return "mixed";
+    }
     const fraction = overlapFraction(this.cuts, range.start, range.end);
     return fraction <= 0 ? "unmarked" : fraction >= 1 ? "marked" : "mixed";
   });
 
   markAction(): void {
     if (this.markerAction === "silence") this.markSelection();
+    else if (this.markerAction === "clip") this.markClipSelection();
     else this.cutSelection();
   }
 
   unmarkAction(): void {
     if (this.markerAction === "silence") this.unmarkSelection();
+    else if (this.markerAction === "clip") this.unmarkClipSelection();
     else {
       const range = this.selectionRange;
       if (!range) return;
@@ -1331,7 +1423,7 @@ export class EditorState {
    * move land as one undo step — see `AudioPlayer.goToAdjacentMarkedRegion`.
    */
   goToAdjacentMarkedRegion(direction: NavDirection): number | null {
-    const region = adjacentMarkedRegion(this.markedIntervals, this.playheadSec, direction);
+    const region = adjacentMarkedRegion(this.actionIntervals, this.playheadSec, direction);
     if (!region) return null;
 
     this.commitEdit(() => {

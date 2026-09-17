@@ -24,6 +24,7 @@ function track(overrides: Partial<TrackDocument> = {}): TrackDocument {
     detected: [],
     manualSilences: [],
     restored: [],
+    clips: [],
     transcript: { status: "missing", words: [] },
     ...overrides,
   };
@@ -109,9 +110,12 @@ describe("cutSuggestions", () => {
 });
 
 describe("parsePodcastProject / serializePodcastProject round-trip", () => {
-  it("round-trips a well-formed project", () => {
+  it("defaults a missing clips field to an empty list so older project files still load", () => {
     const p = project();
-    expect(parsePodcastProject(serializePodcastProject(p))).toEqual(p);
+    const json = JSON.stringify(p);
+    const withoutClips = JSON.parse(json) as PodcastProject;
+    delete (withoutClips.tracks[0] as { clips?: unknown }).clips;
+    expect(parsePodcastProject(JSON.stringify(withoutClips)).tracks[0].clips).toEqual([]);
   });
 
   it("rejects an unsupported version", () => {

@@ -1,5 +1,5 @@
 <script module lang="ts">
-  export type ExportChoice = "recording" | "separate" | "mix" | "both";
+  export type ExportChoice = "recording" | "separate" | "mix" | "both" | "clips-separate" | "clips-mix";
 </script>
 
 <script lang="ts">
@@ -15,6 +15,7 @@
     exportError = null,
     canSave = false,
     canExport = false,
+    canExportClips = false,
     twoTrack = false,
     onSave,
     onSaveAs,
@@ -33,6 +34,7 @@
     exportError?: string | null;
     canSave?: boolean;
     canExport?: boolean;
+    canExportClips?: boolean;
     twoTrack?: boolean;
     onSave: () => void;
     onSaveAs: () => void;
@@ -140,7 +142,7 @@
 >
   <div class="export-sheet">
     <h2 id="export-title">Export</h2>
-    <p>Apply all silence and cut markers to new WAV files. The project stays editable.</p>
+    <p>Apply all silence and cut markers to new WAV files. Clip marks export as a folder of takes — one speaker, or overlapping speakers mixed.</p>
     {#if showExportProgress}
       <div
         class="export-progress"
@@ -161,6 +163,14 @@
       <Button variant="primary" onclick={() => chooseExport("both")}>Both</Button>
     {:else}
       <Button variant="primary" onclick={() => chooseExport("recording")}>Export edited recording</Button>
+    {/if}
+    {#if !showExportProgress && !awaitingDestination}
+      <Button variant="primary" onclick={() => chooseExport("clips-separate")} disabled={!canExportClips}
+        >Export clips separately</Button
+      >
+      <Button variant="primary" onclick={() => chooseExport("clips-mix")} disabled={!canExportClips}
+        >Export clips mixed</Button
+      >
     {/if}
     {#if exportError && !isExporting}
       <p class="fail">Export failed: {exportError}</p>

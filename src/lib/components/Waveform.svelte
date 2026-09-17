@@ -30,6 +30,7 @@
   type DragTarget =
     | { type: "cut"; index: number; edge: "start" | "end" }
     | { type: "silence"; index: number; edge: "start" | "end" }
+    | { type: "clip"; index: number; edge: "start" | "end" }
     | { type: "trim"; edge: "start" | "end"; otherSec: number }
     | { type: "select"; anchorSec: number; startX: number; moved: boolean };
 
@@ -101,6 +102,11 @@
     if (editor.preview === "original") for (let i = 0; i < editor.cuts.length; i++) {
       for (const edge of ["start", "end"] as const)
         if (Math.abs(x - sourceTimeToX(editor.cuts[i][edge], edge)) <= HIT_RADIUS) return {type:"cut",index:i,edge};
+    }
+    for (let i = 0; i < track.rawClips.length; i++) {
+      const clip = track.rawClips[i];
+      if (Math.abs(x - sourceTimeToX(clip.start, "start")) <= HIT_RADIUS) return { type: "clip", index: i, edge: "start" };
+      if (Math.abs(x - sourceTimeToX(clip.end, "end")) <= HIT_RADIUS) return { type: "clip", index: i, edge: "end" };
     }
     for (let i = 0; i < track.markers.length; i++) {
       const displayed = track.markers[i].displayed;
@@ -375,6 +381,27 @@
     }
   }
 
+  function drawClips(ctx: CanvasRenderingContext2D): void {
+    for (const clip of track.rawClips) {
+      const startX = sourceTimeToX(clip.start, "start");
+      const endX = sourceTimeToX(clip.end, "end");
+      const bandWidth = endX - startX;
+      if (bandWidth <= 0) continue;
+      ctx.fillStyle = theme.clipFill;
+      ctx.fillRect(startX, 0, bandWidth, height);
+      ctx.strokeStyle = theme.clipBorder;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(startX, 1);
+      ctx.lineTo(endX, 1);
+      ctx.moveTo(startX, height - 1);
+      ctx.lineTo(endX, height - 1);
+      ctx.stroke();
+      drawTick(ctx, startX);
+      drawTick(ctx, endX);
+    }
+  }
+
   /** The pending drag-to-select range, before Mark/Unmark/Cut is chosen. */
   function drawPendingSelection(ctx: CanvasRenderingContext2D): void {
     const range = editor.cutScopePreview ? editor.selectionRange : editor.selectionFor(track);
@@ -421,6 +448,7 @@
     drawGutters(ctx);
     drawCuts(ctx);
     drawMarkers(ctx);
+    drawClips(ctx);
     drawPendingSelection(ctx);
     drawPlayhead(ctx);
   }
@@ -444,6 +472,7 @@
     // without touching the canvas bitmap itself.
     track.monoSamples;
     track.markers;
+    track.rawClips;
     track.settings.quietThresholdDb;
     amplitudeZoomDb;
     editor.viewStartSec;
@@ -497,6 +526,8 @@
     if (!drag || !track.hasAudio) return;
     if (drag.type === "cut") {
       editor.moveCut(drag.index, drag.edge, xToSourceTime(e.offsetX));
+    } else if (drag.type === "clip") {
+      editor.moveClip(track, drag.index, drag.edge, xToSourceTime(e.offsetX));
     } else if (drag.type === "silence") {
       editor.moveMarker(track, drag.index, drag.edge, resolveSilenceDragSourceSec(drag.index, e.offsetX));
     } else if (drag.type === "trim") {
@@ -531,10 +562,14 @@
         player.seek(drag.anchorSec);
         const at = drag.anchorSec;
         const cut = editor.cuts.find(r => r.start <= at && r.end > at);
+        const clip = track.rawClips.find(r => r.start <= at && r.end > at);
         const silence = track.rawMarkers.find(r => r.start <= at && r.end > at);
         if (cut) {
           editor.markerAction = "cut";
           editor.setSelection(cut.start,cut.end,editor.tracks.map(t => t.id));
+        } else if (clip) {
+          editor.markerAction = "clip";
+          editor.setSelection(clip.start, clip.end, [track.id]);
         } else if (silence) {
           editor.markerAction = "silence";
           editor.setSelection(silence.start,silence.end,[track.id]);
@@ -549,6 +584,9 @@
       player.refreshIfPlaying();
     } else if (drag.type === "cut") {
       editor.finishCutDrag();
+      player.refreshIfPlaying();
+    } else if (drag.type === "clip") {
+      editor.finishClipDrag(track, drag.index);
       player.refreshIfPlaying();
     } else if (drag.type === "silence") {
       // Merge check happens only here, once, rather than on every

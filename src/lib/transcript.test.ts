@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseTranscript, selectedWordRange, wordsAtOffsets } from "./transcript";
+import { findTranscriptMatches, parseTranscript, selectedWordRange, wordsAtOffsets } from "./transcript";
 
 const words = [
   { text: "Hello,", start: 1, end: 1.5, from: 0, to: 6 },
@@ -22,6 +22,31 @@ describe("transcript selection", () => {
   it("handles selections spanning paragraph whitespace and punctuation", () => {
     expect(wordsAtOffsets(words, 11, 17)).toEqual([1, 2]);
     expect(wordsAtOffsets(words, 5, 6)).toEqual([0, 0]);
+  });
+});
+
+describe("findTranscriptMatches", () => {
+  const spoken = [
+    { text: "Hello," },
+    { text: "world!" },
+    { text: "Next" },
+  ];
+
+  it("finds a phrase across consecutive words and a later single word", () => {
+    expect(findTranscriptMatches(spoken, "hello world")).toEqual([{ first: 0, last: 1 }]);
+    expect(findTranscriptMatches(spoken, "NEXT")).toEqual([{ first: 2, last: 2 }]);
+  });
+
+  it("returns nothing for a blank query", () => {
+    expect(findTranscriptMatches(spoken, "  ")).toEqual([]);
+  });
+
+  it("finds every occurrence of a repeated word", () => {
+    const repeated = [{ text: "yes" }, { text: "no" }, { text: "yes" }];
+    expect(findTranscriptMatches(repeated, "yes")).toEqual([
+      { first: 0, last: 0 },
+      { first: 2, last: 2 },
+    ]);
   });
 });
 

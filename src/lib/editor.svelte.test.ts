@@ -52,6 +52,26 @@ describe("toProjectV2 / applyProjectV2 round-trip", () => {
     expect(reloaded.dirty).toBe(false);
   });
 
+  it("carries per-track clip marks through a save/reload cycle without treating them as silences", () => {
+    const editor = twoTrackEditor();
+    editor.markerAction = "clip";
+    editor.setSelection(1, 2, [editor.tracks[0].id]);
+    editor.markAction();
+    editor.setSelection(3, 5, [editor.tracks[1].id]);
+    editor.markAction();
+
+    const saved = editor.toProjectV2("/rec/session.hre.json");
+    expect(saved.tracks[0].clips).toEqual([{ start: 1, end: 2 }]);
+    expect(saved.tracks[1].clips).toEqual([{ start: 3, end: 5 }]);
+    expect(saved.tracks[0].manualSilences).toEqual([]);
+
+    const reloaded = twoTrackEditor();
+    reloaded.applyProjectV2(saved, "/rec/session.hre.json");
+    expect(reloaded.tracks[0].rawClips).toEqual([{ start: 1, end: 2 }]);
+    expect(reloaded.tracks[1].rawClips).toEqual([{ start: 3, end: 5 }]);
+    expect(reloaded.tracks[0].rawMarkers).toEqual([]);
+  });
+
   it("drops the transcript and clamps ranges when the reopened file's content doesn't match what was saved", () => {
     const editor = new EditorState();
     editor.loadAudio(buffer(10), "a.wav", new Float32Array(160000), "/rec/a.wav", "a".repeat(64));
@@ -571,17 +591,49 @@ describe("unified marker actions and zoom", () => {
   });
 
   it("marks, trims, and undoes either action through the same interface", () => {
-    for (const action of ["silence","cut"] as const) {
+    for (const action of ["silence","cut","clip"] as const) {
       const e = twoTrackEditor();
       e.markerAction = action;
       e.setSelection(2,6);
       e.markAction();
       e.setSelection(3,4);
       e.unmarkAction();
-      expect(action === "cut" ? e.cuts : e.rawMarkers).toEqual([{start:2,end:3},{start:4,end:6}]);
+      const regions = action === "cut" ? e.cuts : action === "clip" ? e.rawClips : e.rawMarkers;
+      expect(regions).toEqual([{start:2,end:3},{start:4,end:6}]);
       e.undo();
-      expect(action === "cut" ? e.cuts : e.rawMarkers).toEqual([{start:2,end:6}]);
+      const undone = action === "cut" ? e.cuts : action === "clip" ? e.rawClips : e.rawMarkers;
+      expect(undone).toEqual([{start:2,end:6}]);
     }
+  });
+  it("drags and merges clip marker boundaries without muting or cutting", () => {
+    const e = twoTrackEditor();
+    e.markerAction = "clip";
+    e.setSelection(2, 4, [e.tracks[0].id]);
+    e.markAction();
+    e.setSelection(5, 7, [e.tracks[0].id]);
+    e.markAction();
+    e.commitEdit(() => {
+      e.moveClip(e.tracks[0], 0, "end", 6);
+      e.finishClipDrag(e.tracks[0], 0);
+    });
+    expect(e.tracks[0].rawClips).toEqual([{ start: 2, end: 7 }]);
+    expect(e.tracks[0].rawMarkers).toEqual([]);
+    expect(e.cuts).toEqual([]);
+    e.undo();
+    expect(e.tracks[0].rawClips).toHaveLength(2);
+  });
+  it("steps next/prev through clips when that is the selected marker action", () => {
+    const e = twoTrackEditor();
+    e.markerAction = "clip";
+    e.setSelection(1, 2, [e.tracks[0].id]);
+    e.markAction();
+    e.setSelection(5, 6, [e.tracks[0].id]);
+    e.markAction();
+    e.setActiveTrack(e.tracks[0].id);
+    e.setPlayhead(0);
+    expect(e.goToAdjacentMarkedRegion("next")).toBe(1);
+    e.setPlayhead(1.5);
+    expect(e.goToAdjacentMarkedRegion("next")).toBe(5);
   });
   it("drags and merges cut marker boundaries without removing time", () => {
     const e = twoTrackEditor();

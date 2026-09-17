@@ -1,5 +1,36 @@
 export interface TranscriptWord { text: string; start: number; end: number }
 export interface TextWord extends TranscriptWord { from: number; to: number }
+export interface TranscriptMatch { first: number; last: number }
+
+/** Case-insensitive phrase search over consecutive words, joined with a single space. */
+export function findTranscriptMatches(words: { text: string }[], query: string): TranscriptMatch[] {
+  const needle = query.trim().toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").replace(/\s+/g, " ").trim();
+  if (!needle) return [];
+  const pieces = words.map((word) => word.text.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ""));
+  const offsets: { from: number; to: number }[] = [];
+  let position = 0;
+  for (let i = 0; i < pieces.length; i++) {
+    if (i > 0) position += 1;
+    offsets.push({ from: position, to: position + pieces[i].length });
+    position += pieces[i].length;
+  }
+  const haystack = pieces.join(" ");
+  const matches: TranscriptMatch[] = [];
+  let from = 0;
+  while (from < haystack.length) {
+    const at = haystack.indexOf(needle, from);
+    if (at < 0) break;
+    const end = at + needle.length;
+    const range = wordsAtOffsets(
+      pieces.map((text, i) => ({ text, start: 0, end: 0, from: offsets[i].from, to: offsets[i].to })),
+      at,
+      end,
+    );
+    if (range) matches.push({ first: range[0], last: range[1] });
+    from = at + Math.max(1, needle.length);
+  }
+  return matches;
+}
 
 /** whisper.cpp -ml 1 -sow emits word segments with millisecond offsets. */
 export function parseTranscript(value: unknown, duration: number): TranscriptWord[] {

@@ -11,6 +11,7 @@
     padToFrames,
     renderForExport,
   } from "$lib/audio/exportMix";
+  import { planClipRenders } from "$lib/audio/clipExport";
   import { editor, MAX_TRACKS } from "$lib/editor.svelte";
   import {
     joinPath,
@@ -478,6 +479,9 @@
   }
 
   function startExport(choice: ExportChoice): Promise<void> {
+    if (choice === "clips-separate" || choice === "clips-mix") {
+      return exportClips(choice === "clips-mix" ? "mix" : "separate");
+    }
     return choice === "recording" ? exportRecording() : exportProject(choice);
   }
 
@@ -677,6 +681,67 @@
     }
   }
 
+  async function exportClips(mode: "separate" | "mix"): Promise<void> {
+    if (isExporting) return;
+    const loaded = editor.tracks.flatMap((track) => {
+      const buffer = track.audioBuffer;
+      return buffer
+        ? [
+            {
+              speaker: track.speaker,
+              clips: track.rawClips.map((clip) => ({ ...clip })),
+              channels: trackChannels(buffer),
+              sampleRate: buffer.sampleRate,
+            },
+          ]
+        : [];
+    });
+    if (!loaded.some((track) => track.clips.length)) {
+      exportError = "Mark a clip first — search the transcript, then Mark with Clip selected.";
+      return;
+    }
+    const sampleRate = loaded[0].sampleRate;
+    const mismatch = loaded.find((entry) => entry.sampleRate !== sampleRate);
+    if (mismatch) {
+      exportError =
+        `The tracks were recorded at different sample rates (${sampleRate} Hz and ${mismatch.sampleRate} Hz). ` +
+        `Convert them to a single rate and reopen the project — exporting doesn't resample.`;
+      return;
+    }
+
+    exportError = null;
+    let directory: string | string[] | null;
+    try {
+      directory = await open({
+        directory: true,
+        multiple: false,
+        title: "Choose a folder for the clip files",
+      });
+    } catch (err) {
+      exportError = describeError(err);
+      return;
+    }
+    if (!directory || Array.isArray(directory)) return;
+
+    isExporting = true;
+    exportStatus = null;
+    try {
+      await showExportProgress(0.1, "Preparing clips");
+      const files = planClipRenders(projectStem(editor.fileName), mode, loaded);
+      if (files.length === 0) throw new Error("No clip marks to export.");
+      for (const [index, file] of files.entries()) {
+        await showExportProgress(0.15 + (0.8 * index) / files.length, `Writing ${file.name}`);
+        await writeWav(joinPath(directory, file.name), file.channels, file.sampleRate);
+      }
+      await showExportProgress(1, "Export complete");
+      flashExported(files.length);
+    } catch (err) {
+      exportError = describeError(err);
+    } finally {
+      isExporting = false;
+    }
+  }
+
   function describeError(err: unknown): string {
     return err instanceof Error ? err.message : String(err);
   }
@@ -695,6 +760,9 @@
       editor.commitEdit(() =>
         editor.zoomView(key === "-" || key === "_" ? 1.25 : 0.8),
       );
+    } else if ((e.metaKey || e.ctrlKey) && key === "f") {
+      e.preventDefault();
+      document.querySelector<HTMLInputElement>("[data-transcript-search]")?.focus();
     } else if ((e.metaKey || e.ctrlKey) && key === "s") {
       // Always take over Cmd/Ctrl+S, even in form fields, so the browser's
       // "save page" dialog never has a chance to appear.
@@ -749,6 +817,7 @@
         {exportError}
         canSave={!!editor.filePath}
         canExport={editor.hasAudio}
+        canExportClips={editor.tracks.some((track) => track.rawClips.length > 0)}
         twoTrack={editor.tracks.length > 1}
         onSave={() => saveProject()}
         onSaveAs={saveProjectAs}
@@ -898,6 +967,31 @@
               onclick={() => {
                 editor.setSelection(range.start, range.end, [track.id]);
                 editor.unmarkSelection();
+                player.refreshIfPlaying();
+              }}>Unmark</Button
+            >
+          </div>
+        {/each}
+        <h2>{track.speaker} · {track.rawClips.length} clips</h2>
+        {#each track.rawClips as range (`${track.id}-clip-${range.start}-${range.end}`)}
+          <div class="edit-row">
+            <Button
+              size="tool"
+              variant="secondary"
+              onclick={() => {
+                editor.setActiveTrack(track.id);
+                editor.markerAction = "clip";
+                player.audition(range);
+              }}>{range.start.toFixed(1)} – {range.end.toFixed(1)} s</Button
+            >
+            <Button
+              size="tool"
+              variant="secondary"
+              onclick={() => {
+                editor.setActiveTrack(track.id);
+                editor.markerAction = "clip";
+                editor.setSelection(range.start, range.end, [track.id]);
+                editor.unmarkAction();
                 player.refreshIfPlaying();
               }}>Unmark</Button
             >

@@ -9,8 +9,11 @@
    * Per-speaker settings for the combined, all-track non-speaking pass.
    */
   const track = $derived(editor.activeTrack);
-  const markerCount = $derived(track ? track.markers.filter((r) => r.displayed).length : 0);
-  const currentNumber = $derived(currentRegionNumber(editor.markedIntervals, editor.playheadSec));
+  const markerCount = $derived(editor.actionIntervals.length);
+  const currentNumber = $derived(currentRegionNumber(editor.actionIntervals, editor.playheadSec));
+  const markerKind = $derived(
+    editor.markerAction === "cut" ? "cut" : editor.markerAction === "clip" ? "clip" : "marked",
+  );
   const detectingTrack = $derived(editor.tracks.find(t => t.isDetectingSilence));
   let useVad = $state(true);
 
@@ -135,17 +138,17 @@
     <span class="value">{editor.settings.quietThresholdDb} dB</span>
   </label>
 
-  <span class="count">{markerCount} region{markerCount === 1 ? "" : "s"}</span>
+  <span class="count">{markerCount} {markerKind} region{markerCount === 1 ? "" : "s"}</span>
 
-  <div class="control marker-nav" role="group" aria-label="Marker region navigation">
+  <div class="control marker-nav" role="group" aria-label="{markerKind} region navigation">
     <Button
       size="tool"
       variant="secondary"
       icon="left"
       label={false}
       tooltip
-      title="Previous marked region (shortcut: [)"
-      aria-label="Previous marked region"
+      title="Previous {markerKind} region (shortcut: [)"
+      aria-label="Previous {markerKind} region"
       onclick={() => player.goToAdjacentMarkedRegion("prev")}
       disabled={markerCount === 0}
     >
@@ -158,8 +161,8 @@
       icon="left"
       label={false}
       tooltip
-      title="Next marked region (shortcut: ])"
-      aria-label="Next marked region"
+      title="Next {markerKind} region (shortcut: ])"
+      aria-label="Next {markerKind} region"
       onclick={() => player.goToAdjacentMarkedRegion("next")}
       disabled={markerCount === 0}
     >
@@ -167,7 +170,7 @@
     </Button>
   </div>
 
-  {#each editor.tracks as lane}
+  {#each editor.tracks as lane (lane.id)}
     {#if lane.detectionError}<p class="detect-error">{lane.speaker}: {lane.detectionError}</p>{/if}
   {/each}
 

@@ -1,11 +1,12 @@
 <script lang="ts">
-  import { onMount, untrack } from "svelte";
+  import { onMount, tick, untrack } from "svelte";
   import { editor, type TrackState } from "$lib/editor.svelte";
   import { player } from "$lib/player";
   import { fitWindow } from "$lib/audio/markerNav";
   import { Transcription } from "$lib/transcription.svelte";
-  import { selectedWordRange, wordsAtOffsets } from "$lib/transcript";
+  import { selectedWordRange, wordsAtOffsets, findTranscriptMatches } from "$lib/transcript";
   import Button from "$lib/components/baseline/Button.svelte";
+  import IconSearch from "$lib/components/icons/IconSearch.svelte";
 
   let {
     showSelectionActions = true,
@@ -97,6 +98,23 @@
     return indices;
   });
   const currentWord = $derived(currentWords.values().next().value ?? -1);
+  let searchOpen = $state(false);
+  let searchQuery = $state("");
+  let searchInput: HTMLInputElement | undefined = $state();
+  let matchCursor = $state(-1);
+  const searchMatches = $derived(findTranscriptMatches(words, searchQuery));
+  const hitIndexes = $derived.by(() => {
+    const hits = new Set<number>();
+    for (const match of searchMatches) {
+      for (let i = match.first; i <= match.last; i++) hits.add(i);
+    }
+    return hits;
+  });
+  const activeMatch = $derived(
+    searchMatches.length && matchCursor >= 0
+      ? searchMatches[Math.min(matchCursor, searchMatches.length - 1)]
+      : null,
+  );
   const followIndex = $derived.by(() => {
     if (editor.hasSelection) {
       for (let i = 0; i < words.length; i++) {
@@ -127,6 +145,20 @@
       }
     });
     return marked;
+  });
+  const clipWords = $derived.by(() => {
+    const clipped = new Set<number>();
+    editor.tracks.forEach((track, trackIndex) => {
+      let region = 0;
+      const ranges = track.rawClips;
+      for (const { word, index } of wordsByTrack[trackIndex]) {
+        while (region < ranges.length && ranges[region].end <= word.start)
+          region++;
+        if (region < ranges.length && ranges[region].start < word.end)
+          clipped.add(index);
+      }
+    });
+    return clipped;
   });
   const cutWords = $derived.by(() => {
     let region = 0;
@@ -401,6 +433,55 @@
     editor.toggleSelectionMark();
     player.refreshIfPlaying();
   }
+  function goToMatch(delta: number): void {
+    if (!searchMatches.length) return;
+    const n = searchMatches.length;
+    matchCursor =
+      matchCursor < 0
+        ? delta < 0
+          ? n - 1
+          : 0
+        : (matchCursor + delta + n) % n;
+    const match = searchMatches[matchCursor];
+    select(match.first, match.last, true, true);
+    keepWordInView(match.first);
+  }
+  async function openSearch(): Promise<void> {
+    searchOpen = true;
+    await tick();
+    searchInput?.focus();
+  }
+  function closeSearch(): void {
+    searchOpen = false;
+    searchQuery = "";
+    matchCursor = -1;
+  }
+  function toggleSearch(): void {
+    if (searchOpen) closeSearch();
+    else void openSearch();
+  }
+  function onFindKey(event: KeyboardEvent): void {
+    if (compact) return;
+    if (!(event.metaKey || event.ctrlKey) || event.key.toLowerCase() !== "f")
+      return;
+    event.preventDefault();
+    void openSearch();
+  }
+  function onSearchKeydown(event: KeyboardEvent): void {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      goToMatch(event.shiftKey ? -1 : 1);
+    } else if (event.key === "Escape") {
+      event.preventDefault();
+      event.stopPropagation();
+      if (searchQuery) {
+        searchQuery = "";
+        matchCursor = -1;
+        return;
+      }
+      closeSearch();
+    }
+  }
   function selected(start: number, end: number, trackId: string): boolean {
     if (editor.selectionStartSec === null || editor.selectionEndSec === null)
       return false;
@@ -416,6 +497,7 @@
   onpointercancel={() => {
     dragging = false;
   }}
+  onkeydown={onFindKey}
 />
 <svelte:document onselectionchange={selectionChange} />
 
@@ -443,6 +525,45 @@
       >
         {words.length ? "Transcribe all again" : "Transcribe all tracks"}
       </Button>
+    {/if}
+    {#if words.length}
+      <Button
+        size="tool"
+        variant="secondary"
+        icon="left"
+        label={false}
+        tooltip
+        toggle
+        pressed={searchOpen}
+        title="Search transcript"
+        aria-label="Search transcript"
+        onclick={toggleSearch}
+      >
+        {#snippet glyph()}<IconSearch />{/snippet}
+      </Button>
+    {/if}
+    {#if searchOpen && words.length}
+      <div class="search">
+        <input
+          bind:this={searchInput}
+          bind:value={searchQuery}
+          data-transcript-search
+          type="search"
+          placeholder="Find in transcript"
+          aria-label="Find in transcript"
+          oninput={() => (matchCursor = -1)}
+          onkeydown={onSearchKeydown}
+        />
+        {#if searchQuery.trim()}
+          <span>{searchMatches.length ? `${matchCursor < 0 ? 0 : matchCursor + 1}/${searchMatches.length}` : "0/0"}</span>
+          <Button size="tool" variant="secondary" onclick={() => goToMatch(-1)} disabled={!searchMatches.length}
+            >Prev</Button
+          >
+          <Button size="tool" variant="secondary" onclick={() => goToMatch(1)} disabled={!searchMatches.length}
+            >Next</Button
+          >
+        {/if}
+      </div>
     {/if}
     {#if transcript.error && transcript.modelReady && !transcript.busy}
       <Button variant="secondary" onclick={() => transcript.download()}>Download model again</Button>
@@ -474,15 +595,21 @@
     {/if}
     {#if showSelectionActions && words.length && editor.hasSelection}
       <Button variant="secondary" onclick={mark}
-        >{editor.selectionOverlap === "marked" ? "Unmark" : "Mark"} selection
+        >{editor.actionOverlap === "marked"
+          ? editor.markerAction === "clip"
+            ? "Unmark clip"
+            : "Unmark selection"
+          : editor.markerAction === "clip"
+            ? "Mark clip"
+            : "Mark selection"}
         <kbd>M</kbd></Button
       >
-      {#if editor.selectionOverlap === "mixed"}
+      {#if editor.actionOverlap === "mixed"}
         <Button
           variant="secondary"
           onclick={() => {
             clearNativeSelection();
-            editor.unmarkSelection();
+            editor.unmarkAction();
             player.refreshIfPlaying();
           }}>Unmark selection</Button
         >
@@ -514,10 +641,10 @@
       aria-describedby="transcript-help"
       onkeydown={keydown}
     >
-      {#each paragraphs as paragraph}
+      {#each paragraphs as paragraph (paragraph[0])}
         <p>
           <strong class="speaker-label">{words[paragraph[0]].speaker}</strong
-          >{#each paragraph as index}<span
+          >{#each paragraph as index (index)}<span
               data-word={index}
               class:selected={editor.selectionTrackIds.includes(
                 words[index].trackId,
@@ -528,6 +655,11 @@
                   words[index].trackId,
                 )}
               class:marked={markedWords.has(index)}
+              class:clip={clipWords.has(index)}
+              class:hit={hitIndexes.has(index)}
+              class:active-hit={!!activeMatch &&
+                index >= activeMatch.first &&
+                index <= activeMatch.last}
               class:cut={cutWords[index]}>{words[index].text}</span
             >{" "}{/each}
         </p>
@@ -570,6 +702,30 @@
     font-size: 0.8rem;
     max-width: calc(100% - 8rem);
   }
+  .search {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.4rem;
+    flex: 0 0 auto;
+  }
+  .search input {
+    min-width: 10rem;
+    flex: 1;
+    max-width: 18rem;
+    padding: 0.3rem 0.5rem;
+    border: 1px solid var(--panel-line);
+    border-radius: 4px;
+    background: var(--chassis);
+    color: var(--cream);
+    font: inherit;
+    font-size: 0.8rem;
+  }
+  .search span {
+    font-size: 0.75rem;
+    color: var(--cream-dim);
+    font-family: var(--font-mono);
+  }
   p {
     font-size: 0.85rem;
     margin: 0.65rem 0;
@@ -600,6 +756,16 @@
     background: #24574e;
     text-decoration: underline;
     text-decoration-color: var(--out-color);
+  }
+  .words span.clip {
+    background: rgba(139, 184, 238, 0.28);
+    box-shadow: inset 0 -2px var(--amber);
+  }
+  .words span.hit {
+    background: rgba(139, 184, 238, 0.18);
+  }
+  .words span.active-hit {
+    background: rgba(139, 184, 238, 0.45);
   }
   .words span.cut {
     text-decoration: line-through;

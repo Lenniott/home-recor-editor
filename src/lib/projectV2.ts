@@ -12,6 +12,7 @@ export interface TrackDocument {
   detected: Range[];
   manualSilences: Range[];
   restored: Range[];
+  clips: Range[];
   transcript: { status: 'missing' | 'complete'; words: TranscriptWord[] };
 }
 export interface Workspace {
@@ -88,6 +89,7 @@ export function parsePodcastProject(json: string): PodcastProject {
     const s = t.settings;
     if (!s || !finite(s.positiveSpeechThreshold) || s.positiveSpeechThreshold < .1 || s.positiveSpeechThreshold > .9 || !finite(s.minSilenceMs) || s.minSilenceMs < 0 || s.minSilenceMs > 3000 || !finite(s.bufferMs) || s.bufferMs < 0 || s.bufferMs > 1000 || !finite(s.quietThresholdDb) || s.quietThresholdDb < -100 || s.quietThresholdDb > 0) throw new Error('Invalid silence settings');
     t.detected = ranges(t.detected, t.source.duration); t.manualSilences = ranges(t.manualSilences, t.source.duration); t.restored = ranges(t.restored, t.source.duration);
+    t.clips = t.clips == null ? [] : ranges(t.clips, t.source.duration);
     if (!['missing', 'complete'].includes(t.transcript?.status) || !Array.isArray(t.transcript.words)) throw new Error('Invalid transcript');
     let last = -1;
     for (const word of t.transcript.words) {
@@ -128,6 +130,7 @@ export function reconcileTrack(track: TrackDocument, actualDuration: number, act
     detected: clamp(track.detected),
     manualSilences: clamp(track.manualSilences),
     restored: clamp(track.restored),
+    clips: clamp(track.clips ?? []),
     transcript: { status: 'missing', words: [] },
   };
 }

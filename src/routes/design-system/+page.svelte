@@ -7,6 +7,7 @@
   import ViewPanel from "$lib/components/baseline/ViewPanel.svelte";
   import IconCaret from "$lib/components/icons/IconCaret.svelte";
   import IconChevron from "$lib/components/icons/IconChevron.svelte";
+  import IconClip from "$lib/components/icons/IconClip.svelte";
   import IconClose from "$lib/components/icons/IconClose.svelte";
   import IconExpanded from "$lib/components/icons/IconExpanded.svelte";
   import IconEye from "$lib/components/icons/IconEye.svelte";
@@ -18,6 +19,7 @@
   import IconPlay from "$lib/components/icons/IconPlay.svelte";
   import IconRadio from "$lib/components/icons/IconRadio.svelte";
   import IconRedo from "$lib/components/icons/IconRedo.svelte";
+  import IconSearch from "$lib/components/icons/IconSearch.svelte";
   import IconScissors from "$lib/components/icons/IconScissors.svelte";
   import IconSettings from "$lib/components/icons/IconSettings.svelte";
   import IconSilence from "$lib/components/icons/IconSilence.svelte";
@@ -26,6 +28,7 @@
   import IconZoom from "$lib/components/icons/IconZoom.svelte";
 
   const icons: { name: string; Component: Component<{ size?: number }> }[] = [
+    { name: "Clip", Component: IconClip },
     { name: "Close", Component: IconClose },
     { name: "List", Component: IconList },
     { name: "Marker", Component: IconMarker },
@@ -33,6 +36,7 @@
     { name: "Pause", Component: IconPause },
     { name: "Play", Component: IconPlay },
     { name: "Redo", Component: IconRedo },
+    { name: "Search", Component: IconSearch },
     { name: "Scissors", Component: IconScissors },
     { name: "Settings", Component: IconSettings },
     { name: "Silence", Component: IconSilence },
@@ -49,7 +53,7 @@
   let modelOpen = $state(false);
   let modelPlacement: Placement = $state("center");
   let specimenAside = $state(true);
-  let toolMarker: "silence" | "cut" = $state("silence");
+  let toolMarker: "silence" | "cut" | "clip" = $state("silence");
   let toolView: "both" | "transcript" | "audio" = $state("both");
   let toolPreview = $state(false);
   let toolPlaying = $state(false);

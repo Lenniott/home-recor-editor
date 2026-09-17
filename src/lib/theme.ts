@@ -13,6 +13,9 @@ export const theme = {
   markedBorder: "rgba(63, 167, 154, 0.9)",
   /** Dashed hint at the raw (pre-buffer) VAD-detected extent — the fill itself only covers the buffer-adjusted, conservative "safe to cut" zone. */
   markedRawExtent: "rgba(63, 167, 154, 0.45)",
+  /** Per-track clip marks — export takes, not silences. Amber so they don't read as mute/cut. */
+  clipFill: "rgba(139, 184, 238, 0.28)",
+  clipBorder: "rgba(139, 184, 238, 0.9)",
   /** Collapsed-gutter fill/border for hidden *unmarked* audio (view filter set to "hide unmarked") — neutral, since teal is reserved for marked content. */
   gutterFill: "rgba(242, 230, 208, 0.05)",
   gutterBorder: "rgba(242, 230, 208, 0.35)",

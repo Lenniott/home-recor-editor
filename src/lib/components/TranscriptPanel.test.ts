@@ -165,6 +165,25 @@ describe("transcript panel selection", () => {
     key(target.querySelector('[role="textbox"]')!, "ArrowLeft", true);
     expect([editor.selectionStartSec, editor.selectionEndSec]).toEqual([1, 4.4]);
   });
+  it("finds a phrase and jumps the audio selection to that hit", () => {
+    (target.querySelector('[aria-label="Search transcript"]') as HTMLButtonElement).click();
+    flushSync();
+    const input = target.querySelector("[data-transcript-search]") as HTMLInputElement;
+    input.value = "world";
+    input.dispatchEvent(new InputEvent("input", { bubbles: true }));
+    flushSync();
+    button("Next").click();
+    flushSync();
+    expect([editor.selectionStartSec, editor.selectionEndSec]).toEqual([1.6, 2.2]);
+  });
+  it("marks a clip instead of a silence when clip mode is selected", () => {
+    editor.markerAction = "clip";
+    pointer(target.querySelector('[data-word="1"]')!);
+    button("Mark clip").click();
+    flushSync();
+    expect(editor.rawClips).toEqual([{ start: 1.6, end: 2.2 }]);
+    expect(editor.rawMarkers).toEqual([]);
+  });
   it("does not include a word when native selection ends exactly at its start", () => {
     const first = target.querySelector('[data-word="0"]')!.firstChild!;
     const second = target.querySelector('[data-word="1"]')!.firstChild!;
@@ -208,6 +227,7 @@ describe("project-provided transcript", () => {
         detected: [],
         manualSilences: [],
         restored: [],
+        clips: [],
         transcript: { status: "complete", words: restoredWords },
       }],
       cuts: [],
