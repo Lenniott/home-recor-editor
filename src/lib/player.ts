@@ -193,7 +193,7 @@ export class AudioPlayer {
 
     for (const chunk of chunks) {
       const length = chunk.sourceEnd - chunk.sourceStart;
-      if (elapsedPlaySec <= chunk.playAt + length || chunk === chunks[chunks.length - 1]) {
+      if (elapsedPlaySec < chunk.playAt + length || chunk === chunks[chunks.length - 1]) {
         return chunk.sourceStart + Math.max(0, elapsedPlaySec - chunk.playAt);
       }
     }
