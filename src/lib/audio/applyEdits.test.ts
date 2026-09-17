@@ -136,12 +136,12 @@ describe("renderEdited", () => {
     // 2s minus a 0.3s cut → 1.7s at 100 Hz.
     expect(exported.length).toBe(170);
     // Source 0.2s is before the mute and the cut, so it is copied at full level.
-    expect(exported[20]).toBeCloseTo(0.8);
+    expect(Math.abs(exported[20] - 0.8)).toBeLessThan(1e-5);
     // Duck reaches 0 at the mute start (0.4s kept). The mute then overlaps the
     // cut-splice fade, so later frames in the mute are not held at 0.
-    expect(exported[40]).toBeCloseTo(0);
+    expect(Math.abs(exported[40])).toBeLessThan(1e-5);
     // After the cut, source 1.2s lands at kept 0.9s (1.2 − 0.3), past the 0.1s splice fade-in.
-    expect(exported[90]).toBeCloseTo(0.8);
+    expect(Math.abs(exported[90] - 0.8)).toBeLessThan(1e-5);
   });
 
   it("throws when cuts cover the whole duration", () => {

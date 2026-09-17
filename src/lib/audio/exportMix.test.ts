@@ -74,6 +74,14 @@ describe("downmixToMono", () => {
 });
 
 describe("combineRenders", () => {
+  it("mixes two full-scale mono tracks to stereo clamped at 1", () => {
+    const [left, right] = combineRenders([
+      [new Float32Array([1])],
+      [new Float32Array([1])],
+    ]);
+    expect(left[0]).toBe(1);
+    expect(right[0]).toBe(1);
+  });
   it("sums two mono tracks at half gain each", () => {
     const [mix] = combineRenders([[new Float32Array([1, 1, 0])], [new Float32Array([1, -1, 0.5])]]);
     expect(Array.from(mix)).toEqual([1, 0, 0.25]);
