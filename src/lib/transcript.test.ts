@@ -90,16 +90,16 @@ describe("conversation paragraphs", () => {
         seek: flattened[turn.indices[0]].start,
       })),
     ).toEqual([
-      { speaker: "Host", clock: "00:00–00:01", text: "Hi,", seek: 0.3 },
-      { speaker: "Guest", clock: "00:00–00:01", text: "Hi,", seek: 0.4 },
+      { speaker: "Host", clock: "00:00.3–00:00.8", text: "Hi,", seek: 0.3 },
+      { speaker: "Guest", clock: "00:00.4–00:00.9", text: "Hi,", seek: 0.4 },
       {
         speaker: "Host",
-        clock: "00:01–00:07",
+        clock: "00:01.0–00:06.9",
         text: "this lyrics. I'm guest.",
         seek: 1.0,
       },
-      { speaker: "Guest", clock: "00:07–00:09", text: "thanks me.", seek: 7.2 },
-      { speaker: "Host", clock: "00:11–00:12", text: "Glad to you here.", seek: 10.8 },
+      { speaker: "Guest", clock: "00:07.2–00:08.8", text: "thanks me.", seek: 7.2 },
+      { speaker: "Host", clock: "00:10.8–00:11.8", text: "Glad to you here.", seek: 10.8 },
     ]);
     const glad = flattened.find((word) => word.text === "Glad")!;
     expect(glad.start).toBe(10.8);
@@ -113,10 +113,10 @@ describe("conversation paragraphs", () => {
     ).toEqual(hostFloor);
   });
 
-  it("formats clocks as mm:ss and collapses a one-second span", () => {
-    expect(formatTranscriptClock(0.59)).toBe("00:01");
-    expect(formatParagraphClock(0.59, 5.8)).toBe("00:01–00:06");
-    expect(formatParagraphClock(0.8, 1.2)).toBe("00:01");
+  it("formats clocks with tenths of a second", () => {
+    expect(formatTranscriptClock(0.59)).toBe("00:00.6");
+    expect(formatParagraphClock(0.59, 5.8)).toBe("00:00.6–00:05.8");
+    expect(formatParagraphClock(0.8, 1.2)).toBe("00:00.8–00:01.2");
   });
 
   it("joins same-speaker words into one paragraph, not one word per line", () => {
@@ -126,7 +126,7 @@ describe("conversation paragraphs", () => {
         { clock: 1.2, speaker: "Alex", text: "thanks" },
         { clock: 3, speaker: "Sam", text: "Hello" },
       ]),
-    ).toBe("00:01 Alex\nWelcome thanks\n\n00:03 Sam\nHello\n");
+    ).toBe("00:01.0 Alex\nWelcome thanks\n\n00:03.0 Sam\nHello\n");
   });
 });
 

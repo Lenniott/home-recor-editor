@@ -301,10 +301,10 @@ describe("conversation transcript", () => {
           .join(" "),
       })),
     ).toEqual([
-      { speaker: "Host", clock: "00:01", text: "Hi," },
-      { speaker: "Guest", clock: "00:01–00:02", text: "Hi," },
-      { speaker: "Host", clock: "00:01–00:02", text: "this is" },
-      { speaker: "Guest", clock: "00:02–00:03", text: "thanks" },
+      { speaker: "Host", clock: "00:00.5–00:00.9", text: "Hi," },
+      { speaker: "Guest", clock: "00:00.8–00:01.8", text: "Hi," },
+      { speaker: "Host", clock: "00:00.9–00:02.2", text: "this is" },
+      { speaker: "Guest", clock: "00:01.8–00:03.2", text: "thanks" },
     ]);
   });
   it("runs every track in order and stores results on the job owner despite lane changes", () => {

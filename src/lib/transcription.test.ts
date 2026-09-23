@@ -202,7 +202,7 @@ describe("VAD gating", () => {
     await state.transcribe({ positiveSpeechThreshold: 0.5, quietThresholdDb: -40, minSilenceMs: 1200 });
     const id = mocked.invoke.mock.calls.find(c => c[0] === "start_transcription")![2].headers["x-job-id"];
     event(id, "complete", { result: { transcription: [{ text: "Glad", offsets: { from: 3300, to: 3700 } }] } });
-    expect(formatTranscriptClock(state.words[0]!.start)).toBe("00:07");
+    expect(formatTranscriptClock(state.words[0]!.start)).toBe("00:06.9");
   });
   it("stops a VAD scan on cancel without starting transcription", async () => {
     let finish!: (value: {start:number;end:number}[]) => void;

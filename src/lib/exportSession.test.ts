@@ -484,8 +484,8 @@ describe("runExport", () => {
       "/out/interview-clip-1.txt",
       "/out/interview-clip-2.txt",
     ]);
-    expect(texts[0].contents).toBe("00:00 Alex\nFirst clip\n");
-    expect(texts[1].contents).toBe("00:00 Alex\nSecond\n");
+    expect(texts[0].contents).toBe("00:00.0 Alex\nFirst clip\n");
+    expect(texts[1].contents).toBe("00:00.0 Alex\nSecond\n");
   });
 
   it("existing txt path errors and does not clobber", async () => {

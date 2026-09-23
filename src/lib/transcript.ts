@@ -121,10 +121,18 @@ export function formatExportTranscript(lines: ExportTranscriptLine[]): string {
 }
 
 export function formatTranscriptClock(seconds: number): string {
-  const total = Math.max(0, Math.round(Number.isFinite(seconds) ? seconds : 0));
-  const minutes = Math.floor(total / 60);
-  const secs = total % 60;
-  return `${String(minutes).padStart(2, "0")}:${String(secs).padStart(2, "0")}`;
+  const tenths = Math.max(0, Math.round((Number.isFinite(seconds) ? seconds : 0) * 10));
+  const minutes = Math.floor(tenths / 600);
+  const secs = Math.floor(tenths % 600 / 10);
+  return `${String(minutes).padStart(2, "0")}:${String(secs).padStart(2, "0")}.${tenths % 10}`;
+}
+
+/** Original recording clocks, with minutes allowed to exceed 59. */
+export function parseTranscriptClock(value: unknown): number | null {
+  if (typeof value !== "string" || !/^\d{2,}:[0-5]\d\.\d$/.test(value)) return null;
+  const [minutes, seconds] = value.split(":");
+  const result = Number(minutes) * 60 + Number(seconds);
+  return Number.isFinite(result) ? result : null;
 }
 
 export function formatParagraphClock(start: number, end: number): string {

@@ -36,7 +36,7 @@ describe("speech-only transcription timeline", () => {
       speech,
     );
     expect(restored).toHaveLength(1);
-    expect(formatTranscriptClock(restored[0]!.start)).toBe("00:11");
+    expect(formatTranscriptClock(restored[0]!.start)).toBe("00:10.6");
   });
 
   it("maps stitched thanks onto the heard 7s after dropping false speech in the quiet", () => {
@@ -58,6 +58,6 @@ describe("speech-only transcription timeline", () => {
       speech,
     );
     expect(restored.map((word) => word.text)).toEqual(["Hi,", "thanks"]);
-    expect(formatTranscriptClock(restored[1]!.start)).toBe("00:07");
+    expect(formatTranscriptClock(restored[1]!.start)).toBe("00:07.3");
   });
 });
