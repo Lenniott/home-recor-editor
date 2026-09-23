@@ -368,17 +368,22 @@ pub fn download_transcription_model(app: tauri::AppHandle, job_id: String) -> Re
     Ok(())
 }
 
-fn engine_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+fn bundled_engine_path(app_executable: &Path) -> Result<PathBuf, String> {
+    app_executable
+        .parent()
+        .map(|directory| directory.join("whisper-cli"))
+        .ok_or_else(|| "Could not locate the transcription engine".into())
+}
+
+fn engine_path() -> Result<PathBuf, String> {
     if cfg!(debug_assertions) {
         return Ok(PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("binaries/whisper-cli-aarch64-apple-darwin"));
     }
     // Tauri externalBin puts the executable next to the app executable.
-    Ok(app
-        .path()
-        .executable_dir()
-        .map_err(|e| e.to_string())?
-        .join("whisper-cli"))
+    let app_executable =
+        std::env::current_exe().map_err(|e| format!("Could not locate the running app: {e}"))?;
+    bundled_engine_path(&app_executable)
 }
 
 fn wav_body_error(bytes: &[u8]) -> Result<(), String> {
@@ -415,7 +420,7 @@ pub fn start_transcription(
             let audio = temp.0.join("audio.wav");
             fs::write(&audio, bytes).map_err(|e| e.to_string())?;
             let output = temp.0.join("transcript");
-            let engine = engine_path(&app)?;
+            let engine = engine_path()?;
             emit(&app, &id, "transcribing", Some(0.0), None, None);
             let gpu_result = run(
                 &app,
@@ -558,5 +563,16 @@ mod tests {
         ok[..4].copy_from_slice(b"RIFF");
         ok[8..12].copy_from_slice(b"WAVE");
         assert_eq!(wav_body_error(&ok), Ok(()));
+    }
+
+    #[test]
+    fn bundled_engine_is_next_to_the_running_app_executable() {
+        let app = Path::new("/Applications/Home Recor Editor.app/Contents/MacOS/home-recor-editor");
+        assert_eq!(
+            bundled_engine_path(app),
+            Ok(PathBuf::from(
+                "/Applications/Home Recor Editor.app/Contents/MacOS/whisper-cli",
+            )),
+        );
     }
 }
