@@ -883,3 +883,40 @@ describe("VAD option parity", () => {
     }
   });
 });
+
+describe("imported markers", () => {
+  it("adds through normal merge rules and restores the entire prior batch with undo", () => {
+    const editor = twoTrackEditor();
+    editor.setSpeaker(editor.tracks[0], "Host");
+    editor.setSpeaker(editor.tracks[1], "Guest");
+    mark(editor, editor.tracks[0], 1, 2);
+    const before = editor.markerList.all();
+    expect(editor.addImportedMarkers(JSON.stringify({ markers: [
+      { type: "silence", start: "00:01.5", end: "00:03.0", speakers: ["Host"] },
+      { type: "export", start: "00:04.0", end: "00:06.0", speakers: ["Guest"] },
+      { type: "export", start: "00:05.0", end: "00:07.0", speakers: ["Guest"] },
+      { type: "cut", start: "00:08.0", end: "00:09.0", speakers: ["Host"] },
+    ] }))).toBeNull();
+    const after = editor.markerList.all();
+    expect(after).toHaveLength(4);
+    expect(after[0]).toMatchObject({ start: 1, end: 3 });
+    expect(after[1].laneIds).toEqual([editor.tracks[1].id]);
+    expect(after[3].laneIds).toEqual(editor.tracks.map(track => track.id));
+    editor.undo();
+    expect(editor.markerList.all()).toEqual(before);
+    editor.redo();
+    expect(editor.markerList.all()).toEqual(after);
+  });
+  it("leaves existing marks and history intact on an invalid batch", () => {
+    const editor = twoTrackEditor();
+    editor.addCut({ start: 1, end: 2 });
+    const before = editor.markerList.all();
+    expect(editor.addImportedMarkers(JSON.stringify({ markers: [
+      { type: "cut", start: "00:03.0", end: "00:04.0", speakers: [editor.tracks[0].speaker] },
+      { type: "export", start: "00:05.0", end: "00:06.0", speakers: ["unknown"] },
+    ] }))).toContain("Unknown speaker");
+    expect(editor.markerList.all()).toEqual(before);
+    editor.undo();
+    expect(editor.markerList.all()).toEqual([]);
+  });
+});

@@ -25,3 +25,4 @@ Thu 17 Sep 06:12pm: export marks drag like other marks; clip exports write one p
 Thu 17 Sep 06:18pm: export marks draw the same start/end ticks as silence and cut
 Thu 17 Sep 09:46pm: find next/prev scrolls the transcript pane to the current hit
 Thu 17 Sep 10:35pm: scratch tickets dropped continue idle
+Thu 17 Sep 10:38pm: transcript-only export hides stereo and merge/separate

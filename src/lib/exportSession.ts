@@ -1,3 +1,4 @@
+import { formatMarkerImportSchema } from "./markerImport";
 /**
  * Export session seam: staging, naming, and writes. The page picks a
  * destination then calls `runExport`; tests inject writeWav.
@@ -70,6 +71,7 @@ export async function runExport({
   fileExists,
   includeAudio = true,
   includeTranscript = false,
+  includeMarkerSchema = false,
   applyEdits = true,
   writeText,
 }: {
@@ -86,6 +88,7 @@ export async function runExport({
   fileExists?: (path: string) => boolean | Promise<boolean>;
   includeAudio?: boolean;
   includeTranscript?: boolean;
+  includeMarkerSchema?: boolean;
   applyEdits?: boolean;
 }): Promise<{ error: string | null; written: number }> {
   if (tracks.length === 0) return { error: null, written: 0 };
@@ -183,6 +186,7 @@ export async function runExport({
       marks,
       scope,
       applyEdits,
+      includeMarkerSchema,
       writeText,
       fileExists,
     });
@@ -316,6 +320,7 @@ async function writeTranscriptFile({
   marks,
   scope,
   applyEdits,
+  includeMarkerSchema = false,
   writeText,
   fileExists,
 }: {
@@ -325,10 +330,11 @@ async function writeTranscriptFile({
   marks: ExportMark[];
   scope: ExportScope;
   applyEdits: boolean;
+  includeMarkerSchema?: boolean;
   writeText?: (path: string, contents: string) => Promise<void>;
   fileExists?: (path: string) => boolean | Promise<boolean>;
 }): Promise<{ error: string | null; written: number }> {
-  const jobs = planTranscriptJobs({ tracks, cuts, directory, marks, scope, applyEdits });
+  const jobs = planTranscriptJobs({ tracks, cuts, directory, marks, scope, applyEdits, includeMarkerSchema });
   if (fileExists) {
     for (const job of jobs) {
       if (await fileExists(job.path)) return { error: `${job.path} already exists.`, written: 0 };
@@ -344,6 +350,7 @@ function planTranscriptJobs({
   marks,
   scope,
   applyEdits,
+  includeMarkerSchema = false,
 }: {
   tracks: ExportTrack[];
   cuts: Interval[];
@@ -351,13 +358,15 @@ function planTranscriptJobs({
   marks: ExportMark[];
   scope: ExportScope;
   applyEdits: boolean;
+  includeMarkerSchema?: boolean;
 }): { path: string; contents: string }[] {
   const stem = projectStem(tracks[0].fileName ?? "export");
   if (scope !== "clips") {
     return [
       {
         path: joinPath(directory, `${stem}-transcript.txt`),
-        contents: formatExportTranscript(collectTranscriptLines(tracks, cuts, applyEdits)),
+        contents: formatExportTranscript(collectTranscriptLines(tracks, cuts, applyEdits))
+          + (includeMarkerSchema && !applyEdits ? "\n" + formatMarkerImportSchema(tracks.map(track => track.speaker)) : ""),
       },
     ];
   }

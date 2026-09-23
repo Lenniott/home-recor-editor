@@ -75,3 +75,34 @@ describe("marks list", () => {
     expect(options.some((text) => text.includes("silence"))).toBe(false);
   });
 });
+
+it("pastes markers, reports errors, and keeps typing shortcuts away from selected marks", () => {
+  editor.addCut({ start: 1, end: 2 });
+  const before = editor.markerList.all();
+  editor.selectMarks([before[0].id]);
+  component = mount(MarksList, { target });
+  flushSync();
+  const textarea = target.querySelector("textarea")!;
+  textarea.focus();
+  textarea.dispatchEvent(new KeyboardEvent("keydown", { key: "Backspace", bubbles: true }));
+  textarea.dispatchEvent(new KeyboardEvent("keydown", { key: "a", ctrlKey: true, bubbles: true }));
+  expect(editor.markerList.all()).toEqual(before);
+  const add = [...target.querySelectorAll("button")].find(button => button.textContent?.trim() === "Add markers")!;
+  textarea.value = "invalid";
+  textarea.dispatchEvent(new Event("input", { bubbles: true }));
+  flushSync();
+  add.click();
+  flushSync();
+  expect(target.querySelector('[role="alert"]')?.textContent).toContain("Invalid JSON");
+  expect(textarea.value).toBe("invalid");
+  textarea.value = JSON.stringify({ markers: [{ type: "export", start: "00:03.0", end: "00:04.0", speakers: [editor.tracks[1].speaker] }] });
+  textarea.dispatchEvent(new Event("input", { bubbles: true }));
+  flushSync();
+  add.click();
+  flushSync();
+  expect(target.querySelector('[role="alert"]')).toBeNull();
+  expect(textarea.value).toBe("");
+  expect(editor.markerList.all()).toHaveLength(2);
+  editor.undo();
+  expect(editor.markerList.all()).toEqual(before);
+});

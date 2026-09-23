@@ -513,3 +513,20 @@ describe("runExport", () => {
     expect(texts).toHaveLength(0);
   });
 });
+
+ it.each([
+   ["all", false, true], ["all", true, false], ["clips", false, false],
+ ] as const)("schema scope=%s applyEdits=%s", async (scope, applyEdits, expected) => {
+   const texts: string[] = [];
+   const result = await runExport({
+     mode: "recording", tracks: [{ ...track("Host", { sampleRate: 10, length: 100 }), id: "a", words: [{ text: "Hello", start: 1, end: 2 }] }],
+     cuts: [], directory: "/out", includeAudio: false, includeTranscript: true,
+     includeMarkerSchema: true, scope, applyEdits,
+     marks: [{ start: 0, end: 3, laneIds: ["a"] }],
+     writeWav: async () => { throw new Error("Unexpected audio write"); },
+     writeText: async (_path, contents) => { texts.push(contents); },
+   });
+   expect(result.error).toBeNull();
+   expect(texts).toHaveLength(1);
+   expect(texts[0].includes("Marker JSON instructions")).toBe(expected);
+ });

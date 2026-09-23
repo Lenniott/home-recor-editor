@@ -3,6 +3,20 @@
   import { player } from "../player";
   import Button from "./baseline/Button.svelte";
 
+  let importText = $state("");
+  let importError = $state<string | null>(null);
+  let importStatus = $state("");
+
+  function importMarkers(): void {
+    importError = editor.addImportedMarkers(importText);
+    importStatus = "";
+    if (!importError) {
+      importText = "";
+      importStatus = "Markers added. Undo once to revert this import.";
+      player.refreshIfPlaying();
+    }
+  }
+
   const marks = $derived.by(() => {
     editor.revision;
     return editor.markerList.all();
@@ -32,6 +46,15 @@
     editor.selectMarks([id]);
   }
 </script>
+
+<div class="marker-import">
+  <label for="marker-json">Add markers from JSON</label>
+  <p>Use original recording times and speaker names. Cuts affect every track. Existing marks are kept.</p>
+  <textarea id="marker-json" rows="5" bind:value={importText} placeholder={'{"markers": [...]}'}></textarea>
+  <Button size="tool" variant="secondary" disabled={!importText.trim() || !editor.hasAudio} onclick={importMarkers}>Add markers</Button>
+  {#if importError}<p role="alert">{importError}</p>{/if}
+  <p role="status">{importStatus}</p>
+</div>
 
 <div
   class="marks-list"
@@ -73,6 +96,10 @@
 </div>
 
 <style>
+  .marker-import { display: grid; gap: 0.4rem; margin-bottom: 0.8rem; }
+  .marker-import p { margin: 0; font-size: 0.75rem; }
+  textarea { width: 100%; box-sizing: border-box; resize: vertical; color: inherit; background: var(--panel); border: 1px solid var(--panel-line); border-radius: 4px; padding: 0.5rem; }
+
   .marks-list {
     display: flex;
     flex-direction: column;

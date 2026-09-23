@@ -1,3 +1,4 @@
+import { parseMarkerImport } from "./markerImport";
 import { adjacentMarkedRegion, fitWindow, type NavDirection } from "./audio/markerNav";
 import { vadDetectOptions } from "./audio/sileroThresholds";
 import {
@@ -1264,6 +1265,21 @@ export class EditorState {
       return;
     }
     this.unmarkSelection();
+  }
+
+  /** Validate the whole document before creating one additive undo step. */
+  addImportedMarkers(json: string): string | null {
+    const parsed = parseMarkerImport(json, {
+      speakers: this.tracks.map(track => ({ name: track.speaker, id: track.id })),
+      durationSec: this.durationSec,
+    });
+    if (typeof parsed === "string") return parsed;
+    if (!parsed.length) return null;
+    this.commitEdit(() => {
+      for (const mark of parsed) this.markerList.add(mark.type, mark.start, mark.end, mark.laneIds);
+      this.projectMarks();
+    });
+    return null;
   }
 
   setType(id: string, type: MarkerType): void {

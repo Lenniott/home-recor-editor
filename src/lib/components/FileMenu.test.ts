@@ -227,6 +227,13 @@ describe("FileMenu export", () => {
     expect(audio?.checked).toBe(false);
     expect(transcript?.checked).toBe(true);
     expect(target.querySelector("#export-title")).toBeTruthy();
+    expect(target.querySelector('[name="export-channels"]')).toBeNull();
+    expect(target.textContent).not.toContain("Combined merge");
+    expect(target.textContent).not.toContain("Separate tracks");
+    expect(target.textContent).not.toMatch(/\bBoth\b/);
+    expect(
+      Array.from(target.querySelectorAll("button")).some((button) => button.textContent?.trim() === "Export"),
+    ).toBe(true);
   });
 
   it("openAsTranscript opens the same dialog with Audio off", () => {
@@ -253,5 +260,95 @@ describe("FileMenu export", () => {
     const transcript = target.querySelector<HTMLInputElement>('[name="export-include-transcript"]');
     expect(audio?.checked).toBe(false);
     expect(transcript?.checked).toBe(true);
+  });
+
+  it("transcript-only export sends merge layout without asking stereo", async () => {
+    const received: unknown[] = [];
+    target = document.createElement("div");
+    document.body.append(target);
+    component = mount(FileMenu, {
+      target,
+      props: {
+        twoTrack: true,
+        canExport: true,
+        open: true,
+        onSave: noop,
+        onSaveAs: noop,
+        onOpen: noop,
+        onNew: noop,
+        onImport: noop,
+        onAddRecording: noop,
+        onExport: async (request) => {
+          received.push(request);
+        },
+        onExportReset: noop,
+      },
+    });
+    flushSync();
+    Array.from(target.querySelectorAll("button"))
+      .find((button) => button.textContent?.trim() === "Export transcript…")
+      ?.click();
+    flushSync();
+    Array.from(target.querySelectorAll("button"))
+      .find((button) => button.textContent?.trim() === "Export")
+      ?.click();
+    flushSync();
+    await Promise.resolve();
+    expect(received).toEqual([
+      {
+        scope: "all",
+        layout: "merge",
+        channels: "stereo",
+        includeAudio: false,
+        includeTranscript: true,
+        applyEdits: true,
+      },
+    ]);
+  });
+  it("unedited full transcript requests marker instructions", async () => {
+    const received: unknown[] = [];
+    target = document.createElement("div");
+    document.body.append(target);
+    component = mount(FileMenu, {
+      target,
+      props: {
+        twoTrack: true,
+        canExport: true,
+        open: true,
+        onSave: noop,
+        onSaveAs: noop,
+        onOpen: noop,
+        onNew: noop,
+        onImport: noop,
+        onAddRecording: noop,
+        onExport: async (request) => {
+          received.push(request);
+        },
+        onExportReset: noop,
+      },
+    });
+    flushSync();
+    Array.from(target.querySelectorAll("button"))
+      .find((button) => button.textContent?.trim() === "Export transcript…")
+      ?.click();
+    flushSync();
+    target.querySelector<HTMLInputElement>('[name="export-apply-edits"]')!.click();
+    flushSync();
+    Array.from(target.querySelectorAll("button"))
+      .find((button) => button.textContent?.trim() === "Export")
+      ?.click();
+    flushSync();
+    await Promise.resolve();
+    expect(received).toEqual([
+      {
+        scope: "all",
+        layout: "merge",
+        channels: "stereo",
+        includeAudio: false,
+        includeTranscript: true,
+        applyEdits: false,
+        includeMarkerSchema: true,
+      },
+    ]);
   });
 });

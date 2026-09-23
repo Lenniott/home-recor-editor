@@ -6,6 +6,7 @@
     channels: "mono" | "stereo";
     includeAudio: boolean;
     includeTranscript: boolean;
+    includeMarkerSchema?: boolean;
     applyEdits: boolean;
   };
 </script>
@@ -115,6 +116,7 @@
         includeAudio,
         includeTranscript,
         applyEdits,
+        ...(includeTranscript && exportScope === "all" && !applyEdits ? { includeMarkerSchema: true } : {}),
       });
     } finally {
       awaitingDestination = false;
@@ -201,6 +203,9 @@
       <legend>Transcript</legend>
       <label><input type="checkbox" name="export-apply-edits" bind:checked={applyEdits} /> Apply edits</label>
     </fieldset>
+    {#if includeTranscript}
+      <p>To request JSON markers, choose All and turn Apply edits off. The transcript will include marker instructions using original recording times.</p>
+    {/if}
     <fieldset class="export-flags">
       <legend>Scope</legend>
       <label><input type="radio" name="export-scope" value="all" bind:group={exportScope} /> All</label>
@@ -209,11 +214,13 @@
         Clips
       </label>
     </fieldset>
-    <fieldset class="export-flags">
-      <legend>Channels</legend>
-      <label><input type="radio" name="export-channels" value="stereo" bind:group={exportChannels} /> Stereo</label>
-      <label><input type="radio" name="export-channels" value="mono" bind:group={exportChannels} /> Mono</label>
-    </fieldset>
+    {#if includeAudio}
+      <fieldset class="export-flags">
+        <legend>Channels</legend>
+        <label><input type="radio" name="export-channels" value="stereo" bind:group={exportChannels} /> Stereo</label>
+        <label><input type="radio" name="export-channels" value="mono" bind:group={exportChannels} /> Mono</label>
+      </fieldset>
+    {/if}
     {#if showExportProgress}
       <div
         class="export-progress"
@@ -228,12 +235,14 @@
       </div>
     {:else if awaitingDestination}
       <p class="wait">Choose a save location…</p>
-    {:else if twoTrack}
+    {:else if includeAudio && twoTrack}
       <Button variant="primary" disabled={!canWrite} onclick={() => chooseExport("separate")}>Separate tracks</Button>
       <Button variant="primary" disabled={!canWrite} onclick={() => chooseExport("merge")}>Combined merge</Button>
       <Button variant="primary" disabled={!canWrite} onclick={() => chooseExport("both")}>Both</Button>
-    {:else}
+    {:else if includeAudio}
       <Button variant="primary" disabled={!canWrite} onclick={() => chooseExport("recording")}>Export edited recording</Button>
+    {:else}
+      <Button variant="primary" disabled={!canWrite} onclick={() => chooseExport(twoTrack ? "merge" : "recording")}>Export</Button>
     {/if}
     {#if exportError && !isExporting}
       <p class="fail">Export failed: {exportError}</p>

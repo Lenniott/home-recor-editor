@@ -680,6 +680,7 @@
         channels: request.channels,
         includeAudio: request.includeAudio,
         includeTranscript: request.includeTranscript,
+        includeMarkerSchema: request.includeMarkerSchema,
         applyEdits: request.applyEdits,
         marks: editor.markerList
           .all()
