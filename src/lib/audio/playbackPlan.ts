@@ -60,7 +60,7 @@ export interface PlaybackPlan {
 /**
  * Build a plan to play `[startSourceSec, endSourceSec)` of the project's
  * shared timeline: `spans` says which stretches survive (see
- * `EditorState.timelineSpans` — cuts and the view filter both collapse to
+ * `EditorState.playbackSpans` — cuts and the view filter both collapse to
  * `hidden` spans), and each entry in `tracks` contributes its own
  * in-place silences.
  *
@@ -84,12 +84,51 @@ export function buildPlaybackPlan(
     totalSec,
     tracks: tracks.map((track) => {
       const gain = track.gain ?? 1;
-      const events = [...spliceEvents, ...buildDuckEvents(chunks, track.mutedIntervals)]
-        .map((event) => ({ time: event.time, value: event.value * gain }))
-        .sort((a, b) => a.time - b.time);
+      const events = quieterOf(spliceEvents, buildDuckEvents(chunks, track.mutedIntervals)).map((event) => ({
+        time: event.time,
+        value: event.value * gain,
+      }));
       return { gain, gainEvents: events };
     }),
   };
+}
+
+/**
+ * Combine two gain envelopes by taking the quieter one at every
+ * breakpoint. Interleaving their events instead would let one envelope's
+ * fade back up (a splice fade-out, say) override the other's hold at zero
+ * (a silenced region running into that cut).
+ */
+function quieterOf(a: GainEvent[], b: GainEvent[]): GainEvent[] {
+  const sortedA = [...a].sort((x, y) => x.time - y.time);
+  const sortedB = [...b].sort((x, y) => x.time - y.time);
+  const times = [...new Set([...sortedA, ...sortedB].map((event) => event.time))].sort((x, y) => x - y);
+  const events: GainEvent[] = [];
+  for (const time of times) {
+    const before = Math.min(envelopeAt(sortedA, time, "before"), envelopeAt(sortedB, time, "before"));
+    const after = Math.min(envelopeAt(sortedA, time, "after"), envelopeAt(sortedB, time, "after"));
+    events.push({ time, value: before });
+    if (after !== before) events.push({ time, value: after });
+  }
+  return events;
+}
+
+/**
+ * An envelope's value at `time`, ramping linearly between events from a
+ * resting gain of 1 at time 0. Several events at one time are a step:
+ * "before" reads the first of them, "after" the last.
+ */
+function envelopeAt(events: GainEvent[], time: number, side: "before" | "after"): number {
+  let previous: GainEvent = { time: 0, value: 1 };
+  for (const event of events) {
+    if (event.time < time || (side === "after" && event.time === time)) {
+      previous = event;
+      continue;
+    }
+    if (event.time === previous.time) return event.value;
+    return previous.value + ((event.value - previous.value) * (time - previous.time)) / (event.time - previous.time);
+  }
+  return previous.value;
 }
 
 function buildChunks(spans: TimelineSpan[], startSourceSec: number, endSourceSec: number): PlaybackChunk[] {

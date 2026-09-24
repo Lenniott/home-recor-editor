@@ -21,7 +21,6 @@
   let index: number = $state(0);
   let edgeDrag: {index:number;edge:"start"|"end"} | null = null;
   function startEdge(event: PointerEvent): void {
-    if (editor.preview !== "original") return;
     const target = (event.target as HTMLElement).closest<HTMLElement>("[data-cut-index]");
     if (!target) return;
     const box = target.getBoundingClientRect();

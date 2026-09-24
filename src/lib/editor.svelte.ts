@@ -442,41 +442,52 @@ export class EditorState {
   readonly canAddTrack = $derived(this.hasAudio && this.tracks.length < MAX_TRACKS);
 
   /**
-   * Source spans the shared timeline leaves out. Cuts always (they're the
-   * project's edit), plus whatever the view filter collapses — computed
+   * Source spans the view filter collapses out of the lanes — computed
    * across *all* tracks so the lanes stay aligned: "hide marked" hides
    * only what every track marks as silence, "hide unmarked" keeps
-   * anything at least one track marks. `original` preview hides nothing,
-   * so you hear and see the untouched recordings.
+   * anything at least one track marks. Cuts are never collapsed here:
+   * the lanes keep drawing them in place so they stay visible and
+   * editable, and only playback skips them (see `playbackSpans`).
+   * `original` preview hides nothing.
    */
-  readonly hiddenIntervals: Range[] = $derived.by(() => {
+  readonly filteredIntervals: Range[] = $derived.by(() => {
     if (this.preview === "original" || this.durationSec <= 0) return [];
     const marked = this.tracks.map((t) => t.markedIntervals.map((m) => ({ start: m.start, end: m.end })));
-    let filtered: Range[] = [];
     if (this.viewFilter === "hideMarked" && marked.length > 0) {
-      filtered = marked.reduce(intersect);
-    } else if (this.viewFilter === "hideUnmarked") {
-      const anyMarked = normalize(marked.flat(), this.durationSec);
-      filtered = subtract([{ start: 0, end: this.durationSec }], anyMarked);
+      return normalize(marked.reduce(intersect), this.durationSec);
     }
-    return normalize([...this.cuts, ...filtered], this.durationSec);
+    if (this.viewFilter === "hideUnmarked") {
+      const anyMarked = normalize(marked.flat(), this.durationSec);
+      return subtract([{ start: 0, end: this.durationSec }], anyMarked);
+    }
+    return [];
   });
 
-  /** Timeline collapsed by the cuts and the view filter: alternating spans the waveform/player keep or skip. */
+  /** Timeline the lanes draw: collapsed by the view filter only, so cuts keep their width. */
   readonly timelineSpans: TimelineSpan[] = $derived.by(() =>
-    visibleSpans(this.durationSec, this.hiddenIntervals, "hideMarked"),
+    visibleSpans(this.durationSec, this.filteredIntervals, "hideMarked"),
   );
 
-  /** Length of the collapsed timeline — the "kept" seconds `viewStartSec`/`viewDurationSec` are measured in. */
+  /** Timeline the player schedules: the lanes' collapse plus the cuts, which playback skips in the edited preview. */
+  readonly playbackSpans: TimelineSpan[] = $derived.by(() =>
+    this.preview === "original"
+      ? this.timelineSpans
+      : visibleSpans(this.durationSec, normalize([...this.cuts, ...this.filteredIntervals], this.durationSec), "hideMarked"),
+  );
+
+  /** Length of the lanes' timeline — the "kept" seconds `viewStartSec`/`viewDurationSec` are measured in. */
   readonly displayKeptDuration: number = $derived(keptDuration(this.timelineSpans));
 
+  /** How long playback runs — the transport's total, with cut time taken out in the edited preview. */
+  readonly playbackKeptDuration: number = $derived(keptDuration(this.playbackSpans));
+
   /**
-   * Where the playhead sits on the edited timeline, with the cut time
+   * Where the playhead sits on the played timeline, with the cut time
    * taken out — what the transport counts in, against
-   * `displayKeptDuration`. `playheadSec` itself stays in source time,
+   * `playbackKeptDuration`. `playheadSec` itself stays in source time,
    * since that's what the marks, IN/OUT and transcript are expressed in.
    */
-  readonly playheadKeptSec: number = $derived(sourceToKept(this.timelineSpans, this.playheadSec));
+  readonly playheadKeptSec: number = $derived(sourceToKept(this.playbackSpans, this.playheadSec));
 
   /** Cut candidates: where every track is detected-silent, minus what's already accepted or dismissed. */
   readonly cutSuggestionList: Range[] = $derived.by(() =>

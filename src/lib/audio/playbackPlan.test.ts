@@ -32,7 +32,6 @@ describe("buildPlaybackPlan", () => {
     expect(plan.tracks[0].gainEvents).toEqual([
       { time: 2 - MUTE_FADE_SEC, value: 1 },
       { time: 2, value: 0 },
-      { time: 2, value: 0 },
       { time: 2 + MUTE_FADE_SEC, value: 1 },
     ]);
   });
@@ -115,5 +114,32 @@ describe("buildPlaybackPlan", () => {
     expect(plan.chunks).toEqual([]);
     expect(plan.tracks[0].gainEvents).toEqual([]);
     expect(plan.totalSec).toBe(0);
+  });
+
+  /** Reads the automation the way `linearRampToValueAtTime` plays it: ramp between events, hold after the last. */
+  function gainAt(track: { gain: number; gainEvents: { time: number; value: number }[] }, time: number): number {
+    let previous = { time: 0, value: track.gain };
+    for (const event of track.gainEvents) {
+      if (event.time > time) {
+        if (event.time === previous.time) return event.value;
+        return previous.value + ((event.value - previous.value) * (time - previous.time)) / (event.time - previous.time);
+      }
+      previous = event;
+    }
+    return previous.value;
+  }
+
+  it("keeps a silenced region muted right up to a cut that ends it", () => {
+    // Silence 2–5s runs into the 4–6s cut: plan time 3.95 is source 3.95, still silenced.
+    const plan = buildPlaybackPlan(timeline(10, [{ start: 4, end: 6 }]), 0, 10, [{ mutedIntervals: [{ start: 2, end: 5 }] }]);
+
+    expect(gainAt(plan.tracks[0], 3.95)).toBe(0);
+  });
+
+  it("keeps a silenced region muted straight after a cut that starts inside it", () => {
+    // Silence 5–8s is split by the 4–6s cut: plan time 4.05 is source 6.05, still silenced.
+    const plan = buildPlaybackPlan(timeline(10, [{ start: 4, end: 6 }]), 0, 10, [{ mutedIntervals: [{ start: 5, end: 8 }] }]);
+
+    expect(gainAt(plan.tracks[0], 4.05)).toBe(0);
   });
 });

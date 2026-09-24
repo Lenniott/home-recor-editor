@@ -333,8 +333,8 @@ describe("shared cuts", () => {
 
     expect(editor.cuts).toEqual([{ start: 2, end: 4 }]);
     editor.setPreview("edited");
-    expect(editor.displayKeptDuration).toBe(8);
-    expect(editor.timelineSpans.map((s) => [s.kind, s.sourceStart, s.sourceEnd])).toEqual([
+    expect(editor.playbackKeptDuration).toBe(8);
+    expect(editor.playbackSpans.map((s) => [s.kind, s.sourceStart, s.sourceEnd])).toEqual([
       ["keep", 0, 2],
       ["hidden", 2, 4],
       ["keep", 4, 10],
@@ -366,8 +366,7 @@ describe("shared cuts", () => {
     editor.addCut({ start: 2, end: 4 });
     editor.setPreview("original");
 
-    expect(editor.hiddenIntervals).toEqual([]);
-    expect(editor.displayKeptDuration).toBe(10);
+    expect(editor.playbackKeptDuration).toBe(10);
     expect(editor.mutedIntervalsFor(editor.tracks[0])).toEqual([]);
   });
 });
@@ -462,7 +461,7 @@ describe("non-destructive playback", () => {
 
     editor.setPreview("edited");
     const plan = buildPlaybackPlan(
-      editor.timelineSpans,
+      editor.playbackSpans,
       0,
       editor.durationSec,
       editor.tracks.map((track) => ({ mutedIntervals: editor.mutedIntervalsFor(track) })),
@@ -485,7 +484,7 @@ describe("non-destructive playback", () => {
     editor.setPreview("original");
 
     const plan = buildPlaybackPlan(
-      editor.timelineSpans,
+      editor.playbackSpans,
       0,
       editor.durationSec,
       editor.tracks.map((track) => ({ mutedIntervals: editor.mutedIntervalsFor(track) })),
@@ -530,14 +529,14 @@ describe("applyTranscript", () => {
 });
 
 describe("cleanup review workflow", () => {
-  it("keeps new cut markers on the full timeline until edited preview is requested", () => {
+  it("plays new cut markers in full until edited preview is requested", () => {
     const e = twoTrackEditor();
     e.setSelection(2, 4);
     e.cutSelection();
     expect(e.cuts).toEqual([{ start: 2, end: 4 }]);
-    expect(e.displayKeptDuration).toBe(10);
+    expect(e.playbackKeptDuration).toBe(10);
     e.setPreview("edited");
-    expect(e.displayKeptDuration).toBe(8);
+    expect(e.playbackKeptDuration).toBe(8);
   });
   it("silences every explicitly selected lane and no others", () => {
     const e = twoTrackEditor();

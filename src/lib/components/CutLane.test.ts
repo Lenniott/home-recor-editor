@@ -114,3 +114,25 @@ describe("cut lane review", () => {
     expect(editor.displayKeptDuration).toBe(10);
   });
 });
+
+describe("cut lane in the edited preview", () => {
+  function pointer(element: Element, type: string, clientX: number): void {
+    element.dispatchEvent(new MouseEvent(type, { clientX, bubbles: true }));
+    flushSync();
+  }
+
+  it("keeps the cut on the full timeline so its edge can still be dragged", () => {
+    HTMLElement.prototype.setPointerCapture = () => {};
+    click(button("Mark cut"));
+    editor.setPreview("edited");
+    flushSync();
+
+    // jsdom lays the strip out at zero width, so one pixel reads as one second.
+    const cutBand = target.querySelector(".mark.cut")!;
+    pointer(cutBand, "pointerdown", 0);
+    pointer(cutBand, "pointermove", 4);
+    pointer(cutBand, "pointerup", 4);
+
+    expect(editor.cuts).toEqual([{ start: 4, end: 6 }]);
+  });
+});

@@ -114,7 +114,7 @@
       }
     }
     if (exportHit) return { type: "export", id: exportHit.id, edge: exportHit.edge };
-    if (editor.preview === "original") for (let i = 0; i < editor.cuts.length; i++) {
+    for (let i = 0; i < editor.cuts.length; i++) {
       for (const edge of ["start", "end"] as const)
         if (Math.abs(x - sourceTimeToX(editor.cuts[i][edge], edge)) <= HIT_RADIUS) return {type:"cut",index:i,edge};
     }
@@ -236,18 +236,7 @@
     ctx.restore();
   }
 
-  /**
-   * True when a hidden span overlaps one of the project's shared cuts —
-   * not necessarily fully: `editor.hiddenIntervals` merges a cut with any
-   * touching/overlapping view-filter-hidden region into one wider span, so
-   * requiring full containment would miss a cut that's only part of a
-   * merged gutter and paint it as ordinary filtered-out audio instead.
-   */
-  function isCutSpan(span: TimelineSpan): boolean {
-    return editor.cuts.some((cut) => span.sourceStart < cut.end - EPS && span.sourceEnd > cut.start + EPS);
-  }
-
-  /** Collapsed spans render as a narrow band — red for a shared cut, teal for marked audio being hidden, neutral otherwise. */
+  /** Collapsed spans render as a narrow band — teal for marked audio being hidden, neutral otherwise. */
   function drawGutters(ctx: CanvasRenderingContext2D): void {
     for (const span of editor.timelineSpans) {
       if (span.kind !== "hidden") continue;
@@ -257,12 +246,11 @@
       const gutterWidth = clampedEnd - clampedStart;
       if (gutterWidth <= 0) continue;
 
-      const cut = isCutSpan(span);
-      ctx.fillStyle = cut ? theme.cutFill : editor.viewFilter === "hideMarked" ? theme.markedFill : theme.gutterFill;
+      ctx.fillStyle = editor.viewFilter === "hideMarked" ? theme.markedFill : theme.gutterFill;
       ctx.fillRect(clampedStart, 0, gutterWidth, height);
 
       ctx.save();
-      ctx.strokeStyle = cut ? theme.cutBorder : editor.viewFilter === "hideMarked" ? theme.markedBorder : theme.gutterBorder;
+      ctx.strokeStyle = editor.viewFilter === "hideMarked" ? theme.markedBorder : theme.gutterBorder;
       ctx.lineWidth = 1;
       ctx.setLineDash([2, 3]);
       ctx.beginPath();
@@ -275,13 +263,8 @@
     }
   }
 
-  /**
-   * Accepted cuts, while the original preview is showing them in place —
-   * in the edited preview they're collapsed into gutters instead (see
-   * `drawGutters`), which is the whole point of a cut.
-   */
+  /** Accepted cuts, drawn in place in both previews — the edited preview skips them in playback, not on screen. */
   function drawCuts(ctx: CanvasRenderingContext2D): void {
-    if (editor.preview !== "original") return;
     for (const cut of editor.cuts) {
       const startX = sourceTimeToX(cut.start, "start");
       const endX = sourceTimeToX(cut.end, "end");

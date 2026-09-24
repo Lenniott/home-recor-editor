@@ -820,7 +820,7 @@
         canPlay={editor.hasAudio}
         playing={editor.isPlaying}
         currentSec={editor.playheadKeptSec}
-        durationSec={editor.displayKeptDuration}
+        durationSec={editor.playbackKeptDuration}
         playbackRate={playbackRate}
         preview={editor.preview === "edited"}
         onplay={() => player.toggle()}

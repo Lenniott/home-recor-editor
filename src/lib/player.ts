@@ -79,7 +79,7 @@ export class AudioPlayer {
     // combined export mix — see the plan's export section.
     const gain = 1 / tracks.length;
     const plan = buildPlaybackPlan(
-      this.editor.timelineSpans,
+      this.editor.playbackSpans,
       startSec,
       boundary,
       tracks.map((track) => ({ mutedIntervals: this.editor.mutedIntervalsFor(track), gain })),
