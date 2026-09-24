@@ -378,6 +378,7 @@ describe("cut suggestion review", () => {
     const [first, second] = editor.tracks;
     editor.setBufferMs(0, first);
     editor.setBufferMs(0, second);
+    editor.setCutBufferMs(0);
     mark(editor, first, 2, 6);
     mark(editor, first, 8, 10);
     mark(editor, second, 3, 7);
@@ -386,7 +387,7 @@ describe("cut suggestion review", () => {
 
   it("suggests only the span both tracks call silence", () => {
     const editor = withOverlappingSilence();
-    expect(editor.cutSuggestionList).toEqual([{ start: 3, end: 6 }]);
+    expect(editor.cutSuggestionList).toMatchObject([{ start: 3, end: 6 }]);
   });
 
   it("accepting a suggestion moves it into the cuts and stops suggesting it", () => {
@@ -424,9 +425,10 @@ describe("cut suggestion review", () => {
     const [first, second] = editor.tracks;
     editor.setBufferMs(0, first);
     editor.setBufferMs(0, second);
+    editor.setCutBufferMs(0);
     mark(editor, first, 5, 10);
 
-    expect(editor.cutSuggestionList).toEqual([{ start: 6, end: 10 }]);
+    expect(editor.cutSuggestionList).toMatchObject([{ start: 6, end: 10 }]);
   });
 
   it("re-running detection on one track keeps the other's marks, the accepted cuts, and the dismissals", async () => {
@@ -446,7 +448,7 @@ describe("cut suggestion review", () => {
     expect(editor.tracks[1].rawMarkers).toEqual([{ start: 3, end: 7 }]);
     expect(editor.cuts).toEqual([{ start: 3, end: 4 }]);
     expect(editor.dismissed).toEqual([{ start: 4, end: 5 }]);
-    expect(editor.cutSuggestionList).toEqual([{ start: 5, end: 7 }]);
+    expect(editor.cutSuggestionList).toMatchObject([{ start: 5, end: 7 }]);
   });
 });
 
@@ -765,6 +767,32 @@ describe("unified marker actions and zoom", () => {
 });
 
 describe("track document round-trip", () => {
+  it("dragging a silence edge to the end of the track keeps the saved project reopenable", () => {
+    const editor = new EditorState();
+    editor.loadAudio(buffer(), "a.wav", new Float32Array(160000), "/rec/a.wav", "a".repeat(64));
+    editor.setBufferMs(150);
+    mark(editor, editor.tracks[0], 8, 9);
+    editor.moveMarker(editor.tracks[0], 0, "end", 10);
+
+    const json = serializePodcastProject(editor.toProjectV2("/rec/a.hre.json"));
+    expect(() => parsePodcastProject(json)).not.toThrow();
+  });
+
+  it("reopens a just-saved project with an accepted auto cut and its cut settings", () => {
+    const editor = twoTrackEditor();
+    mark(editor, editor.tracks[0], 2, 6);
+    mark(editor, editor.tracks[1], 3, 7);
+    editor.setCutBufferMs(250);
+    editor.addCut(editor.cutSuggestionList[0]);
+
+    const json = serializePodcastProject(editor.toProjectV2("/rec/a.hre.json"));
+    const reloaded = twoTrackEditor();
+    reloaded.applyProjectV2(parsePodcastProject(json), "/rec/a.hre.json");
+
+    expect(reloaded.cutSettings.bufferMs).toBe(250);
+    expect(reloaded.cuts).toEqual(editor.cuts);
+  });
+
   it("save then applyProjectV2 keeps rawMarkers when bufferMs is 150", () => {
     const editor = new EditorState();
     editor.loadAudio(buffer(), "a.wav", new Float32Array(160000), "/rec/a.wav", "a".repeat(64));
@@ -782,14 +810,14 @@ describe("track document round-trip", () => {
     const editor = twoTrackEditor();
     editor.setBufferMs(0, editor.tracks[0]);
     editor.setBufferMs(0, editor.tracks[1]);
-    editor.setMinSilenceMs(0, editor.tracks[0]);
-    editor.setMinSilenceMs(0, editor.tracks[1]);
+    editor.setCutMinMs(0);
+    editor.setCutBufferMs(0);
     mark(editor, editor.tracks[0], 1, 3);
     mark(editor, editor.tracks[1], 2, 4);
-    expect(editor.cutSuggestionList).toEqual([{ start: 2, end: 3 }]);
+    expect(editor.cutSuggestionList).toMatchObject([{ start: 2, end: 3 }]);
     editor.setSelection(5, 8, editor.tracks.map((track) => track.id));
     editor.markSelection();
-    expect(editor.cutSuggestionList).toEqual([{ start: 2, end: 3 }, { start: 5, end: 8 }]);
+    expect(editor.cutSuggestionList).toMatchObject([{ start: 2, end: 3 }, { start: 5, end: 8 }]);
   });
 
   it("save/reload keeps a two-lane silence as one mark", () => {

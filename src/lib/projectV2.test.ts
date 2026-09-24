@@ -88,23 +88,43 @@ describe("trackSilences", () => {
 });
 
 describe("cutSuggestions", () => {
-  it("suggests only where every track's detected silence overlaps, above the loosest minimum", () => {
-    const a = track({ id: "a", detected: [{ start: 2, end: 6 }], settings: { ...DEFAULT_SETTINGS, bufferMs: 0, minSilenceMs: 1000 } });
-    const b = track({ id: "b", detected: [{ start: 3, end: 7 }], settings: { ...DEFAULT_SETTINGS, bufferMs: 0, minSilenceMs: 500 } });
-    expect(cutSuggestions([a, b], 10, [], [])).toEqual([{ start: 3, end: 6 }]);
+  it("suggests the raw silence overlap, trimmed inward by the cut buffer", () => {
+    const a = track({ id: "a", detected: [{ start: 2, end: 6 }] });
+    const b = track({ id: "b", detected: [{ start: 3, end: 7 }] });
+    expect(cutSuggestions([a, b], 10, [], [], { minMs: 1000, bufferMs: 250 })).toEqual([
+      { start: 3.25, end: 5.75, raw: { start: 3, end: 6 } },
+    ]);
+  });
+
+  it("skips an overlap shorter than the min cut length, however long each track's own silence is", () => {
+    const a = track({ id: "a", detected: [{ start: 1, end: 6 }] });
+    const b = track({ id: "b", detected: [{ start: 5, end: 9 }] });
+    expect(cutSuggestions([a, b], 10, [], [], { minMs: 1500, bufferMs: 0 })).toEqual([]);
+    expect(cutSuggestions([a, b], 10, [], [], { minMs: 1000, bufferMs: 0 })).toEqual([
+      { start: 5, end: 6, raw: { start: 5, end: 6 } },
+    ]);
+  });
+
+  it("drops an overlap the cut buffer would trim away entirely", () => {
+    const a = track({ id: "a", detected: [{ start: 2, end: 3 }] });
+    const b = track({ id: "b", detected: [{ start: 2, end: 3 }] });
+    expect(cutSuggestions([a, b], 10, [], [], { minMs: 500, bufferMs: 500 })).toEqual([]);
   });
 
   it("treats a shorter track's missing tail as silence", () => {
-    const a = track({ id: "a", detected: [], source: { ...track().source, duration: 4 }, settings: { ...DEFAULT_SETTINGS, bufferMs: 0 } });
-    const b = track({ id: "b", detected: [{ start: 3, end: 10 }], settings: { ...DEFAULT_SETTINGS, bufferMs: 0 } });
-    expect(cutSuggestions([a, b], 10, [], [])).toEqual([{ start: 4, end: 10 }]);
+    const a = track({ id: "a", detected: [], source: { ...track().source, duration: 4 } });
+    const b = track({ id: "b", detected: [{ start: 3, end: 10 }] });
+    expect(cutSuggestions([a, b], 10, [], [], { minMs: 1000, bufferMs: 0 })).toEqual([
+      { start: 4, end: 10, raw: { start: 4, end: 10 } },
+    ]);
   });
 
   it("excludes cuts and dismissed suggestions already decided on", () => {
-    const settings = { ...DEFAULT_SETTINGS, bufferMs: 0, minSilenceMs: 500 };
-    const a = track({ id: "a", detected: [{ start: 0, end: 5 }], settings });
-    const b = track({ id: "b", detected: [{ start: 0, end: 5 }], settings });
-    expect(cutSuggestions([a, b], 10, [{ start: 0, end: 2 }], [{ start: 2, end: 4 }])).toEqual([{ start: 4, end: 5 }]);
+    const a = track({ id: "a", detected: [{ start: 0, end: 5 }] });
+    const b = track({ id: "b", detected: [{ start: 0, end: 5 }] });
+    expect(cutSuggestions([a, b], 10, [{ start: 0, end: 2 }], [{ start: 2, end: 4 }], { minMs: 500, bufferMs: 0 })).toEqual([
+      { start: 4, end: 5, raw: { start: 4, end: 5 } },
+    ]);
   });
 });
 
@@ -117,6 +137,12 @@ describe("parsePodcastProject / serializePodcastProject round-trip", () => {
     expect(round.cuts).toEqual(p.cuts);
     expect(round.workspace).toEqual(p.workspace);
     expect(round.markers).toEqual([]);
+  });
+
+  it("opens a project whose silence overhangs the end of its recording, trimmed to the recording", () => {
+    const p = project({ tracks: [track({ manualSilences: [{ start: 9, end: 10.15 }] })] });
+    const round = parsePodcastProject(serializePodcastProject(p));
+    expect(round.tracks[0].manualSilences).toEqual([{ start: 9, end: 10 }]);
   });
 
   it("rejects an unsupported version", () => {

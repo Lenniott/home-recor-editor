@@ -22,6 +22,7 @@ import { EditHistory } from "./editHistory";
 import { MarkerList, markersFromV2, type MarkerType, type TimelineMarker } from "./markers";
 import { reconcileProjectWithDuration, type ProjectFile } from "./projectFile";
 import {
+  DEFAULT_CUT_SETTINGS,
   cutSuggestions,
   intersect,
   normalize,
@@ -29,6 +30,8 @@ import {
   relativeSourcePath,
   subtract,
   trackSilences,
+  type CutSettings,
+  type CutSuggestion,
   type PodcastProject,
   type Range,
   type TrackDocument,
@@ -48,7 +51,15 @@ export type SelectionOverlap = "unmarked" | "marked" | "mixed";
 export type PreviewMode = "original" | "edited";
 
 export type { ViewFilter };
-export type { Range };
+export type { Range, CutSettings, CutSuggestion };
+
+/** One cut marker as the lanes draw it: its stored extent, and what's actually cut once the cut buffer trims it (null if the buffer eats it all). */
+export interface CutMark {
+  id: string;
+  raw: Range;
+  applied: Range | null;
+  buffered: boolean;
+}
 
 export interface SilenceSettings {
   /** Silero VAD speech-probability threshold (0-1); higher = less sensitive. */
@@ -205,6 +216,7 @@ interface SessionSnapshot {
   activeTrackId: string | null;
   cuts: Range[];
   dismissed: Range[];
+  cutSettings: CutSettings;
   preview: PreviewMode;
   inSec: number;
   outSec: number;
@@ -231,6 +243,7 @@ function cloneSnapshot(snapshot: SessionSnapshot): SessionSnapshot {
     markers: snapshot.markers.map((marker) => ({ ...marker, laneIds: [...marker.laneIds] })),
     cuts: snapshot.cuts.map((r) => ({ ...r })),
     dismissed: snapshot.dismissed.map((r) => ({ ...r })),
+    cutSettings: { ...snapshot.cutSettings },
   };
 }
 
@@ -243,6 +256,7 @@ function markersEqual(a: TimelineMarker[], b: TimelineMarker[]): boolean {
         marker.type === b[i].type &&
         marker.start === b[i].start &&
         marker.end === b[i].end &&
+        Boolean(marker.buffered) === Boolean(b[i].buffered) &&
         marker.laneIds.join() === b[i].laneIds.join(),
     )
   );
@@ -279,6 +293,8 @@ function snapshotsEqual(a: SessionSnapshot, b: SessionSnapshot): boolean {
     a.loopInOut === b.loopInOut &&
     regionsEqual(a.cuts, b.cuts) &&
     regionsEqual(a.dismissed, b.dismissed) &&
+    a.cutSettings.minMs === b.cutSettings.minMs &&
+    a.cutSettings.bufferMs === b.cutSettings.bufferMs &&
     markersEqual(a.markers, b.markers) &&
     a.tracks.length === b.tracks.length &&
     a.tracks.every(
@@ -308,8 +324,12 @@ export class EditorState {
    * tracks together, they stay in sync.
    */
   cuts: Range[] = $state([]);
-  /** Cut suggestions explicitly turned down, so they stop being re-suggested. */
+  /** Every cut marker with its stored and applied extent, in the order `moveCut` indexes. */
+  cutMarks: CutMark[] = $state([]);
+  /** Cut suggestions explicitly turned down (as raw overlaps), so they stop being re-suggested. */
   dismissed: Range[] = $state([]);
+  /** The project-wide second pass that turns shared silence into cut suggestions — see `cutSuggestions`. */
+  cutSettings: CutSettings = $state({ ...DEFAULT_CUT_SETTINGS });
 
   /**
    * Full path of the project (`.hre.json`) itself — distinct from a
@@ -490,13 +510,14 @@ export class EditorState {
   readonly playheadKeptSec: number = $derived(sourceToKept(this.playbackSpans, this.playheadSec));
 
   /** Cut candidates: where every track is detected-silent, minus what's already accepted or dismissed. */
-  readonly cutSuggestionList: Range[] = $derived.by(() =>
+  readonly cutSuggestionList: CutSuggestion[] = $derived.by(() =>
     this.hasAudio
       ? cutSuggestions(
           this.tracks.map((t) => t.silenceDocument),
           this.durationSec,
-          this.cuts,
+          this.cutMarks.map((mark) => mark.raw),
           this.dismissed,
+          this.cutSettings,
         )
       : [],
   );
@@ -541,6 +562,7 @@ export class EditorState {
       activeTrackId: this.activeTrack?.id ?? null,
       cuts: this.cuts.map((r) => ({ ...r })),
       dismissed: this.dismissed.map((r) => ({ ...r })),
+      cutSettings: { ...this.cutSettings },
       preview: this.preview,
       inSec: this.inSec,
       outSec: this.outSec,
@@ -563,6 +585,7 @@ export class EditorState {
       target.settings = track.settings;
       target.speaker = track.speaker;
     });
+    this.cutSettings = { ...snapshot.cutSettings };
     this.markerList = new MarkerList(this.tracks.map((track) => track.id));
     this.markerList.replace(snapshot.markers);
     this.projectMarks();
@@ -584,7 +607,15 @@ export class EditorState {
 
   private projectMarks(): void {
     for (const track of this.tracks) track.rawMarkers = this.markerList.silencesOn(track.id);
-    this.cuts = normalize(this.markerList.cuts(), this.durationSec);
+    const buffer = this.cutSettings.bufferMs / 1000;
+    this.cutMarks = this.markerList.cutMarkers().map((marker) => {
+      const raw = { start: marker.start, end: marker.end };
+      const buffered = Boolean(marker.buffered);
+      const start = buffered ? raw.start + buffer : raw.start;
+      const end = buffered ? raw.end - buffer : raw.end;
+      return { id: marker.id, raw, applied: end > start ? { start, end } : null, buffered };
+    });
+    this.cuts = normalize(this.cutMarks.flatMap((mark) => (mark.applied ? [mark.applied] : [])), this.durationSec);
     this.projectedExports = this.markerList.all().filter((marker) => marker.type === "export");
     const live = new Set(this.markerList.all().map((marker) => marker.id));
     this.selectedMarkIds = this.selectedMarkIds.filter((id) => live.has(id));
@@ -710,6 +741,7 @@ export class EditorState {
     this.tracks = [];
     this.activeTrackId = null;
     this.dismissed = [];
+    this.cutSettings = { ...DEFAULT_CUT_SETTINGS };
     this.resetMarkerList();
     this.resetSessionState(0);
     this.projectPath = null;
@@ -856,6 +888,7 @@ export class EditorState {
       cuts: this.cuts.map((r) => ({ ...r })),
       dismissed: this.dismissed.map((r) => ({ ...r })),
       markers: this.markerList.all(),
+      cutSettings: { ...this.cutSettings },
       workspace: {
         activeTrackId: this.activeTrack?.id ?? tracks[0]?.id ?? "track-1",
         preview: this.preview,
@@ -906,6 +939,7 @@ export class EditorState {
       project.cuts,
       project.tracks.map((track) => track.id),
     );
+    this.cutSettings = { ...(project.cutSettings ?? DEFAULT_CUT_SETTINGS) };
     this.markerList = new MarkerList(this.tracks.map((track) => track.id));
     this.markerList.replace(
       rawMarkers.flatMap((marker) => {
@@ -1116,6 +1150,24 @@ export class EditorState {
     this.updateSettings(track, { quietThresholdDb });
   }
 
+  /** Project-wide: the shortest shared silence worth suggesting as a cut. */
+  setCutMinMs(minMs: number): void {
+    this.cutSettings = { ...this.cutSettings, minMs: Math.max(0, minMs) };
+    this.revision++;
+  }
+
+  /**
+   * Project-wide: re-trims every suggestion and every buffered cut.
+   * `adoptIds` are cuts already made — their stored range becomes the
+   * overlap the buffer trims, so the slider reaches them too.
+   */
+  setCutBufferMs(bufferMs: number, adoptIds: string[] = []): void {
+    this.cutSettings = { ...this.cutSettings, bufferMs: Math.max(0, bufferMs) };
+    for (const id of adoptIds) this.markerList.bufferCut(id);
+    this.projectMarks();
+    this.revision++;
+  }
+
   /**
    * Second, non-ML detection pass (see `silenceRegionsFromAmplitude`):
    * flags anything quieter than `settings.quietThresholdDb`, independent
@@ -1155,8 +1207,9 @@ export class EditorState {
     if (!mark) return;
     const clamped = clamp(newDisplayedSec, 0, track.durationSec);
     const moved = moveMarker({ start: mark.start, end: mark.end }, track.settings.bufferMs, edge, clamped);
+    // Adding the buffer back can push a raw edge past the recording, which a saved project can't hold.
     this.markerList.resize(mark.id, "start", moved.start);
-    this.markerList.resize(mark.id, "end", moved.end);
+    this.markerList.resize(mark.id, "end", Math.min(moved.end, track.durationSec));
     this.projectMarks();
   }
 
@@ -1337,10 +1390,13 @@ export class EditorState {
     else if (this.actionOverlap !== null) this.markAction();
   }
 
+  /** Drag a cut's applied edge; a buffered cut stores the edge back out by the buffer so the slider keeps working on it. */
   moveCut(index: number, edge: "start" | "end", sec: number): void {
-    const mark = this.markerList.all().filter((marker) => marker.type === "cut").sort((a, b) => a.start - b.start)[index];
+    const mark = this.markerList.cutMarkers()[index];
     if (!mark) return;
-    const value = clamp(sec, edge === "end" ? mark.start + .001 : 0, edge === "start" ? mark.end - .001 : this.durationSec);
+    const pad = mark.buffered ? this.cutSettings.bufferMs / 1000 : 0;
+    const raw = edge === "start" ? sec - pad : sec + pad;
+    const value = clamp(raw, edge === "end" ? mark.start + 2 * pad + .001 : 0, edge === "start" ? mark.end - 2 * pad - .001 : this.durationSec);
     this.markerList.resize(mark.id, edge, value);
     this.projectMarks();
   }
@@ -1369,15 +1425,20 @@ export class EditorState {
    * every track at once, which is exactly why two synced recordings stay
    * synced across a cut. Reversible — see `restoreCut` and undo.
    */
-  addCut(range: Range): void {
-    if (range.end <= range.start) return;
+  /**
+   * A suggestion (it carries `raw`) is stored as its raw overlap and
+   * trimmed by the live cut buffer; a plain range is cut exactly.
+   */
+  addCut(range: Range | CutSuggestion): void {
+    const extent = "raw" in range ? range.raw : range;
+    if (extent.end <= extent.start) return;
     this.commitEdit(() => {
       this.setPreview("original");
       this.setViewFilter("all");
-      this.markerList.add("cut", range.start, range.end, this.tracks.map((track) => track.id));
+      this.markerList.add("cut", extent.start, extent.end, this.tracks.map((track) => track.id), "raw" in range);
       this.projectMarks();
       // A cut that's been accepted has nothing left to suggest or dismiss.
-      this.dismissed = subtract(this.dismissed, [range]);
+      this.dismissed = subtract(this.dismissed, [extent]);
     });
   }
 
@@ -1385,6 +1446,9 @@ export class EditorState {
   restoreCut(range: Range): void {
     this.commitEdit(() => {
       this.markerList.subtract("cut", range.start, range.end, this.tracks.map((track) => track.id));
+      this.projectMarks();
+      // Buffered leftovers the buffer now trims to nothing would be invisible, undraggable marks.
+      this.markerList.remove(this.cutMarks.filter((mark) => !mark.applied).map((mark) => mark.id));
       this.projectMarks();
     });
   }
@@ -1400,10 +1464,11 @@ export class EditorState {
   }
 
   /** Turn a suggestion down: it stops being suggested, and nothing is removed. */
-  dismissCut(range: Range): void {
-    if (range.end <= range.start) return;
+  dismissCut(range: Range | CutSuggestion): void {
+    const extent = "raw" in range ? range.raw : range;
+    if (extent.end <= extent.start) return;
     this.commitEdit(() => {
-      this.dismissed = normalize([...this.dismissed, range], this.durationSec);
+      this.dismissed = normalize([...this.dismissed, extent], this.durationSec);
     });
   }
 

@@ -74,6 +74,74 @@ describe("marks list", () => {
     expect(options.every((text) => text.includes("cut"))).toBe(true);
     expect(options.some((text) => text.includes("silence"))).toBe(false);
   });
+
+  function rows(): HTMLButtonElement[] {
+    return [...target.querySelectorAll<HTMLButtonElement>('[role="option"]')];
+  }
+  function press(name: string): void {
+    [...target.querySelectorAll("button")].find((button) => button.textContent?.trim() === name)?.click();
+    flushSync();
+  }
+
+  it("filters the list to one marker type", () => {
+    editor.setSelection(1, 2);
+    editor.markSelection(editor.tracks[0]);
+    editor.addCut({ start: 5, end: 6 });
+    component = mount(MarksList, { target });
+    flushSync();
+
+    press("Cuts");
+
+    expect(rows().map((row) => row.textContent)).toEqual(["cut 5.0 – 6.0 s"]);
+  });
+
+  it("shift-click selects the rows between the last click and this one", () => {
+    editor.addCut({ start: 1, end: 2 });
+    editor.addCut({ start: 3, end: 4 });
+    editor.addCut({ start: 5, end: 6 });
+    component = mount(MarksList, { target });
+    flushSync();
+    const [first, , third] = rows();
+    first.click();
+    flushSync();
+    third.dispatchEvent(new MouseEvent("click", { shiftKey: true, bubbles: true }));
+    flushSync();
+
+    expect(editor.selectedMarkIds).toEqual(editor.markerList.all().map((mark) => mark.id));
+  });
+
+  it("select all takes only the rows the filter is showing", () => {
+    editor.setSelection(1, 2);
+    editor.markSelection(editor.tracks[0]);
+    editor.addCut({ start: 5, end: 6 });
+    component = mount(MarksList, { target });
+    flushSync();
+    press("Cuts");
+    press("Select all");
+
+    expect(editor.selectedMarkIds).toEqual([editor.markerList.all().find((mark) => mark.type === "cut")!.id]);
+  });
+
+  it("the cut buffer slider trims the selected cuts that were already made and shows their new bounds", () => {
+    editor.addCut({ start: 2, end: 8 });
+    editor.addCut({ start: 0.5, end: 1 });
+    const [wide] = editor.markerList.all();
+    editor.selectMarks([wide.id]);
+    component = mount(MarksList, { target });
+    flushSync();
+
+    const slider = target.querySelector<HTMLInputElement>('input[aria-label="Buffer selected cuts"]')!;
+    slider.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }));
+    slider.value = "500";
+    slider.dispatchEvent(new Event("input", { bubbles: true }));
+    slider.dispatchEvent(new PointerEvent("pointerup", { bubbles: true }));
+    flushSync();
+
+    expect(editor.cuts).toEqual([{ start: 0.5, end: 1 }, { start: 2.5, end: 7.5 }]);
+    expect(rows().map((row) => row.textContent)).toContain("cut 2.5 – 7.5 s");
+    editor.undo();
+    expect(editor.cuts).toEqual([{ start: 0.5, end: 1 }, { start: 2, end: 8 }]);
+  });
 });
 
 it("pastes markers, reports errors, and keeps typing shortcuts away from selected marks", () => {

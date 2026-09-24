@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { editor, type Range } from "../editor.svelte";
+  import { editor, type CutMark, type Range } from "../editor.svelte";
   import { player } from "../player";
   import { keptToSource } from "../audio/timelineMap";
   import { laneLayout } from "../audio/laneLayout";
@@ -43,16 +43,21 @@
     editor.endEdit();
     player.refreshIfPlaying();
   }
-  function selectCut(event: MouseEvent, range: Range): void {
+  function selectCut(event: MouseEvent, mark: CutMark, range: Range): void {
     editor.markerAction = "cut";
     editor.setSelection(range.start, range.end, editor.tracks.map((t) => t.id));
     editor.cutScopePreview = true;
-    const mark = editor.markerList
-      .all()
-      .find((item) => item.type === "cut" && item.start === range.start && item.end === range.end);
-    if (!mark) return;
     if (event.metaKey || event.ctrlKey) editor.toggleMarkSelection(mark.id);
     else editor.selectMarks([mark.id]);
+  }
+
+  // Slider drags are one undo step each — same pattern as SilenceControls.
+  function onCutMin(e: Event): void {
+    editor.setCutMinMs(Number((e.currentTarget as HTMLInputElement).value));
+  }
+  function onCutBuffer(e: Event): void {
+    editor.setCutBufferMs(Number((e.currentTarget as HTMLInputElement).value));
+    player.refreshIfPlaying();
   }
 
   const suggestions = $derived(editor.cutSuggestionList);
@@ -117,16 +122,21 @@
   </div>
 
   <div class="strip" bind:clientWidth={width} aria-label="Shared cut lane" role="group" onpointerdown={startEdge} onpointermove={moveEdge} onpointerup={endEdge} onpointercancel={endEdge}>
-    {#each editor.cuts as cut, cutIndex}
-      {@const box = band(cut)}
-      {#if box}
+    {#each editor.cutMarks as mark, cutIndex (mark.id)}
+      {@const cut = mark.applied}
+      {@const box = cut ? band(cut) : null}
+      {#if mark.buffered}
+        {@const extent = band(mark.raw)}
+        {#if extent}<span class="extent" style="left:{extent.left}px;width:{extent.width}px"></span>{/if}
+      {/if}
+      {#if cut && box}
         <button
           type="button"
           class="mark cut"
           data-cut-index={cutIndex}
           style="left:{box.left}px;width:{box.width}px"
           title="Cut {formatTime(cut.start)}–{formatTime(cut.end)} — select to edit, drag either edge"
-          onclick={(event) => selectCut(event, cut)}
+          onclick={(event) => selectCut(event, mark, cut)}
           aria-label="Select cut at {formatTime(cut.start)}"
         ></button>
       {/if}
@@ -183,6 +193,38 @@
       <Button size="tool" variant="secondary" class="dismiss" onclick={() => dismiss(current)}>Dismiss</Button>
     {/if}
     <Button size="tool" variant="secondary" onclick={acceptAll} disabled={suggestions.length === 0}>Mark all suggestions</Button>
+    <label class="setting" title="Only shared silence at least this long becomes a suggestion">
+      <span class="label">Min cut length</span>
+      <input
+        type="range"
+        min="0"
+        max="5000"
+        step="50"
+        value={editor.cutSettings.minMs}
+        oninput={onCutMin}
+        onpointerdown={() => editor.beginEdit()}
+        onpointerup={() => editor.endEdit()}
+        onpointercancel={() => editor.endEdit()}
+        aria-label="Min cut length"
+      />
+      <span class="readout">{editor.cutSettings.minMs} ms</span>
+    </label>
+    <label class="setting" title="Silence kept at each end of a suggested cut, so it never lands on speech. Moves cuts already accepted from suggestions too.">
+      <span class="label">Cut buffer</span>
+      <input
+        type="range"
+        min="0"
+        max="1000"
+        step="10"
+        value={editor.cutSettings.bufferMs}
+        oninput={onCutBuffer}
+        onpointerdown={() => editor.beginEdit()}
+        onpointerup={() => editor.endEdit()}
+        onpointercancel={() => editor.endEdit()}
+        aria-label="Cut buffer"
+      />
+      <span class="readout">{editor.cutSettings.bufferMs} ms</span>
+    </label>
   </div>
   {/if}
 </div>
@@ -240,6 +282,26 @@
     z-index: 2;
     background: rgba(209, 73, 91, 0.35);
     border-color: var(--in-color);
+  }
+
+  .extent {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    z-index: 1;
+    pointer-events: none;
+    border-left: 1px dashed var(--in-color);
+    border-right: 1px dashed var(--in-color);
+  }
+
+  .setting {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+  }
+
+  .setting input[type="range"] {
+    width: 90px;
   }
 
   .mark.suggestion {

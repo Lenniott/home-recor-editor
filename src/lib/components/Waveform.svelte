@@ -1,6 +1,6 @@
 <script lang="ts">
   import { getContext } from "svelte";
-  import { editor, type TrackState } from "../editor.svelte";
+  import { editor, type Range, type TrackState } from "../editor.svelte";
   import { player } from "../player";
   import { computePeaksRange, type PeakColumns } from "../audio/peaks";
   import { laneLayout } from "../audio/laneLayout";
@@ -114,9 +114,11 @@
       }
     }
     if (exportHit) return { type: "export", id: exportHit.id, edge: exportHit.edge };
-    for (let i = 0; i < editor.cuts.length; i++) {
+    for (let i = 0; i < editor.cutMarks.length; i++) {
+      const applied = editor.cutMarks[i].applied;
+      if (!applied) continue;
       for (const edge of ["start", "end"] as const)
-        if (Math.abs(x - sourceTimeToX(editor.cuts[i][edge], edge)) <= HIT_RADIUS) return {type:"cut",index:i,edge};
+        if (Math.abs(x - sourceTimeToX(applied[edge], edge)) <= HIT_RADIUS) return {type:"cut",index:i,edge};
     }
     for (let i = 0; i < track.markers.length; i++) {
       const displayed = track.markers[i].displayed;
@@ -265,7 +267,10 @@
 
   /** Accepted cuts, drawn in place in both previews — the edited preview skips them in playback, not on screen. */
   function drawCuts(ctx: CanvasRenderingContext2D): void {
-    for (const cut of editor.cuts) {
+    for (const mark of editor.cutMarks) {
+      if (mark.buffered) drawCutExtent(ctx, mark.raw);
+      const cut = mark.applied;
+      if (!cut) continue;
       const startX = sourceTimeToX(cut.start, "start");
       const endX = sourceTimeToX(cut.end, "end");
       if (endX <= startX) continue;
@@ -277,6 +282,24 @@
       drawTick(ctx, startX);
       drawTick(ctx, endX);
     }
+  }
+
+  /** A buffered cut's full silence overlap, as a dashed hint around the band — same idea as a silence mark's raw extent. */
+  function drawCutExtent(ctx: CanvasRenderingContext2D, raw: Range): void {
+    const startX = sourceTimeToX(raw.start, "start");
+    const endX = sourceTimeToX(raw.end, "end");
+    if (endX <= startX) return;
+    ctx.save();
+    ctx.strokeStyle = theme.cutBorder;
+    ctx.lineWidth = 1;
+    ctx.setLineDash([3, 4]);
+    ctx.beginPath();
+    ctx.moveTo(startX + 0.5, 0);
+    ctx.lineTo(startX + 0.5, height);
+    ctx.moveTo(endX - 0.5, 0);
+    ctx.lineTo(endX - 0.5, height);
+    ctx.stroke();
+    ctx.restore();
   }
 
   /** Export marks: same edge ticks as silence/cut. Fill only — they don't hatch or mute. */
@@ -470,7 +493,7 @@
     editor.cuts;
     editor.projectedExports;
     editor.playheadSec;
-    editor.cuts;
+    editor.cutMarks;
     editor.selectionRanges;
     editor.cutScopePreview;
     editor.selectionTrackIds;

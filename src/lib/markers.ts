@@ -6,6 +6,8 @@ export interface TimelineMarker {
   start: number;
   end: number;
   laneIds: string[];
+  /** A cut from a suggestion: `start`/`end` are its raw silence overlap, and the project's cut buffer trims it inward live. */
+  buffered?: boolean;
 }
 
 function clone(marker: TimelineMarker): TimelineMarker {
@@ -53,7 +55,7 @@ export class MarkerList {
     });
   }
 
-  add(type: MarkerType, start: number, end: number, laneIds: string[]): void {
+  add(type: MarkerType, start: number, end: number, laneIds: string[], buffered = false): void {
     if (end <= start) return;
     const lanes = type === "cut" ? [...this.trackIds] : uniqueLanes(laneIds);
     if (lanes.length === 0) return;
@@ -63,6 +65,7 @@ export class MarkerList {
       start,
       end,
       laneIds: lanes,
+      ...(buffered && type === "cut" ? { buffered: true } : {}),
     });
   }
 
@@ -77,8 +80,15 @@ export class MarkerList {
     const marker = this.items.find((item) => item.id === id);
     if (!marker) return;
     marker.type = type;
+    delete marker.buffered;
     if (type === "cut") marker.laneIds = [...this.trackIds];
     this.mergeOverlapping();
+  }
+
+  /** Treat a cut's stored range as the full overlap the live cut buffer trims. */
+  bufferCut(id: string): void {
+    const marker = this.items.find((item) => item.id === id);
+    if (marker?.type === "cut") marker.buffered = true;
   }
 
   mergeOverlapping(): void {
@@ -146,6 +156,11 @@ export class MarkerList {
       .sort((a, b) => a.start - b.start);
   }
 
+  /** Cut markers in timeline order — the order `EditorState.moveCut` indexes into. */
+  cutMarkers(): TimelineMarker[] {
+    return this.items.filter((marker) => marker.type === "cut").sort((a, b) => a.start - b.start).map(clone);
+  }
+
   exportsOn(laneId: string): { start: number; end: number }[] {
     return this.items
       .filter((marker) => marker.type === "export" && marker.laneIds.includes(laneId))
@@ -166,10 +181,12 @@ export class MarkerList {
         kept.push(marker);
         continue;
       }
+      // Merging into a buffered cut keeps the buffer: trimming speech margin back is safer than cutting into it.
       pending = {
         ...pending,
         start: Math.min(pending.start, marker.start),
         end: Math.max(pending.end, marker.end),
+        ...(pending.buffered || marker.buffered ? { buffered: true } : {}),
       };
     }
     this.items = [...kept, pending];

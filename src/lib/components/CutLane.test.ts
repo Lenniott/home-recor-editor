@@ -46,6 +46,7 @@ beforeEach(() => {
   editor.addTrack(buffer(), "b.wav", new Float32Array(160000), "/rec/b.wav", "b".repeat(64));
   editor.setBufferMs(0, editor.tracks[0]);
   editor.setBufferMs(0, editor.tracks[1]);
+  editor.setCutBufferMs(0);
   mark(0, 2, 6);
   mark(0, 8, 10);
   mark(1, 3, 7);
@@ -64,25 +65,25 @@ afterEach(async () => {
 
 describe("cut lane review", () => {
   it("counts the suggestions where both tracks are silent", () => {
-    expect(editor.cutSuggestionList).toEqual([{ start: 3, end: 6 }, { start: 8, end: 10 }]);
+    expect(editor.cutSuggestionList).toMatchObject([{ start: 3, end: 6 }, { start: 8, end: 10 }]);
     expect(target.textContent).toContain("1 / 2");
   });
 
   it("steps through suggestions and auditions each one", () => {
     click(labelled("Next suggestion"));
     expect(target.textContent).toContain("2 / 2");
-    expect(player.audition).toHaveBeenCalledWith({ start: 8, end: 10 });
+    expect(player.audition).toHaveBeenCalledWith(expect.objectContaining({ start: 8, end: 10 }));
 
     click(labelled("Previous suggestion"));
     expect(target.textContent).toContain("1 / 2");
-    expect(player.audition).toHaveBeenLastCalledWith({ start: 3, end: 6 });
+    expect(player.audition).toHaveBeenLastCalledWith(expect.objectContaining({ start: 3, end: 6 }));
   });
 
   it("accepts the current suggestion into the shared cuts", () => {
     click(button("Mark cut"));
 
     expect(editor.cuts).toEqual([{ start: 3, end: 6 }]);
-    expect(editor.cutSuggestionList).toEqual([{ start: 8, end: 10 }]);
+    expect(editor.cutSuggestionList).toMatchObject([{ start: 8, end: 10 }]);
     expect(editor.displayKeptDuration).toBe(10);
     expect(target.textContent).toContain("1 cut");
   });
@@ -92,7 +93,7 @@ describe("cut lane review", () => {
 
     expect(editor.cuts).toEqual([]);
     expect(editor.dismissed).toEqual([{ start: 3, end: 6 }]);
-    expect(editor.cutSuggestionList).toEqual([{ start: 8, end: 10 }]);
+    expect(editor.cutSuggestionList).toMatchObject([{ start: 8, end: 10 }]);
     expect(editor.displayKeptDuration).toBe(10);
   });
 

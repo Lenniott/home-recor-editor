@@ -40,6 +40,8 @@ export interface PodcastProject {
   dismissed: Range[];
   workspace: Workspace;
   markers?: TimelineMarker[];
+  /** Absent in projects saved before cut settings existed — read as `DEFAULT_CUT_SETTINGS`. */
+  cutSettings?: CutSettings;
 }
 export const DEFAULT_SETTINGS: ProjectSettings = { positiveSpeechThreshold: 0.5, minSilenceMs: 1200, bufferMs: 150, quietThresholdDb: -40 };
 export function normalize(ranges: Range[], duration = Infinity): Range[] {
@@ -67,16 +69,36 @@ export function detectedSilences(track: TrackDocument): Range[] {
 export function trackSilences(track: TrackDocument): Range[] {
   return normalize([...subtract(detectedSilences(track), track.restored), ...track.manualSilences], track.source.duration);
 }
-export function cutSuggestions(tracks: TrackDocument[], duration: number, cuts: Range[], dismissed: Range[]): Range[] {
+/** The second, project-wide pass that turns shared silence into cuts — independent of each track's own silence settings. */
+export interface CutSettings {
+  /** Shortest shared-silence overlap worth cutting. */
+  minMs: number;
+  /** Trimmed off both ends of the overlap, so a cut never lands right on speech. */
+  bufferMs: number;
+}
+export const DEFAULT_CUT_SETTINGS: CutSettings = { minMs: 1200, bufferMs: 150 };
+
+/** A cut to apply (`start`/`end`), plus the full silence overlap it came from, so the buffer can be re-applied later. */
+export interface CutSuggestion extends Range { raw: Range }
+
+/**
+ * Where every track's raw detected silence overlaps for at least
+ * `minMs`, minus what's already cut or dismissed (both as raw extents),
+ * trimmed inward by `bufferMs`.
+ */
+export function cutSuggestions(tracks: TrackDocument[], duration: number, cuts: Range[], dismissed: Range[], cut: CutSettings = DEFAULT_CUT_SETTINGS): CutSuggestion[] {
   if (!tracks.length) return [];
-  const candidates = tracks.map(t => normalize([...detectedSilences(t), ...(t.source.duration < duration ? [{ start: t.source.duration, end: duration }] : [])]));
+  const candidates = tracks.map(t => normalize([...t.detected, ...(t.source.duration < duration ? [{ start: t.source.duration, end: duration }] : [])], duration));
   const common = candidates.reduce(intersect);
-  const minimum = Math.max(...tracks.map(t => t.settings.minSilenceMs)) / 1000;
-  return subtract(common, [...cuts, ...dismissed]).filter(r => r.end - r.start >= minimum);
+  const minimum = cut.minMs / 1000, buffer = cut.bufferMs / 1000;
+  return subtract(common, [...cuts, ...dismissed])
+    .filter(r => r.end - r.start >= minimum)
+    .flatMap(raw => raw.end - raw.start > 2 * buffer ? [{ start: raw.start + buffer, end: raw.end - buffer, raw }] : []);
 }
 const finite = (x: unknown): x is number => typeof x === 'number' && Number.isFinite(x);
+/** A range that only overhangs the recording's end is trimmed to it — the overhang holds no audio, so nothing is lost. */
 function ranges(value: unknown, duration: number): Range[] {
-  if (!Array.isArray(value) || value.some(r => !r || !finite(r.start) || !finite(r.end) || r.start < 0 || r.end > duration + 1e-6)) throw new Error('Invalid project edit ranges');
+  if (!Array.isArray(value) || value.some(r => !r || !finite(r.start) || !finite(r.end) || r.start < 0 || r.start > duration + 1e-6)) throw new Error('Invalid project edit ranges');
   return normalize(value, duration);
 }
 /** Reject malformed projects before replacing the current session. No silent loss of edits. */
@@ -99,6 +121,8 @@ export function parsePodcastProject(json: string): PodcastProject {
   }
   const duration = Math.max(...p.tracks.map((t: TrackDocument) => t.source.duration));
   p.cuts = ranges(p.cuts, duration); p.dismissed = ranges(p.dismissed, duration);
+  if (p.cutSettings === undefined) p.cutSettings = { ...DEFAULT_CUT_SETTINGS };
+  else if (!finite(p.cutSettings?.minMs) || p.cutSettings.minMs < 0 || !finite(p.cutSettings.bufferMs) || p.cutSettings.bufferMs < 0) throw new Error('Invalid cut settings');
   const idsList = [...ids];
   if (p.version === 3) {
     p.markers = parseMarkers(p.markers, idsList, duration);
@@ -131,6 +155,7 @@ function parseMarkers(value: unknown, trackIds: string[], duration: number): Tim
       start,
       end,
       laneIds: marker.type === 'cut' ? [...trackIds] : [...new Set(marker.laneIds as string[])],
+      ...(marker.type === 'cut' && marker.buffered === true ? { buffered: true } : {}),
     });
   }
   return markers;
