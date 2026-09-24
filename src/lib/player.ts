@@ -2,6 +2,14 @@ import type { NavDirection } from "./audio/markerNav";
 import { buildPlaybackPlan, type PlaybackPlan } from "./audio/playbackPlan";
 import { editor, type EditorState, type TrackState } from "./editor.svelte";
 
+/** Presets exposed by the transport speed control. Pitch follows rate. */
+export const PLAYBACK_RATES = [0.5, 0.75, 1, 1.25, 1.5, 2] as const;
+export type PlaybackRate = (typeof PLAYBACK_RATES)[number];
+
+function isPlaybackRate(value: number): value is PlaybackRate {
+  return (PLAYBACK_RATES as readonly number[]).includes(value);
+}
+
 /**
  * Owns the AudioContext / AudioBufferSourceNode lifecycle and keeps
  * `editor.playheadSec` moving while a project plays. Callers only ever
@@ -11,7 +19,8 @@ import { editor, type EditorState, type TrackState } from "./editor.svelte";
  *
  * Every loaded track is scheduled against the same plan (see
  * `buildPlaybackPlan`), so one clock drives both lanes and a cut takes
- * the same seconds out of each.
+ * the same seconds out of each. `playbackRate` scales how fast that plan
+ * runs in AudioContext time without changing the plan's own 1× math.
  */
 export class AudioPlayer {
   private readonly editor: EditorState;
@@ -21,9 +30,24 @@ export class AudioPlayer {
   private plan: PlaybackPlan | null = null;
   private planContextStart = 0;
   private rafHandle: number | null = null;
+  private rate: PlaybackRate = 1;
 
   constructor(editor: EditorState) {
     this.editor = editor;
+  }
+
+  get playbackRate(): PlaybackRate {
+    return this.rate;
+  }
+
+  /**
+   * Session-only speed. Rebuilds the schedule if already playing so the
+   * playhead keeps its source position at the new rate.
+   */
+  setRate(rate: number): void {
+    if (!isPlaybackRate(rate) || rate === this.rate) return;
+    this.rate = rate;
+    this.refreshIfPlaying();
   }
 
   /** Also used to decode newly opened files, so decode and playback share one context. */
@@ -69,10 +93,12 @@ export class AudioPlayer {
     }
 
     const contextStart = context.currentTime;
+    const rate = this.rate;
     // Paired with each source's real end time — tracks of different
     // lengths schedule different numbers of chunks (a shorter track drops
     // its trailing ones), so the source that actually ends last isn't
-    // necessarily the last one pushed below.
+    // necessarily the last one pushed below. End times are in context
+    // seconds (plan time / rate).
     const sources: { source: AudioBufferSourceNode; end: number }[] = [];
     const gains: GainNode[] = [];
 
@@ -81,7 +107,7 @@ export class AudioPlayer {
       gainNode.gain.value = plan.tracks[index].gain;
       gainNode.connect(context.destination);
       for (const event of plan.tracks[index].gainEvents) {
-        gainNode.gain.linearRampToValueAtTime(event.value, contextStart + event.time);
+        gainNode.gain.linearRampToValueAtTime(event.value, contextStart + event.time / rate);
       }
       gains.push(gainNode);
 
@@ -91,10 +117,11 @@ export class AudioPlayer {
         if (chunk.sourceStart >= track.audioBuffer.duration) continue;
         const source = context.createBufferSource();
         source.buffer = track.audioBuffer;
+        source.playbackRate.value = rate;
         source.connect(gainNode);
         const length = Math.min(chunk.sourceEnd, track.audioBuffer.duration) - chunk.sourceStart;
-        source.start(contextStart + chunk.playAt, chunk.sourceStart, length);
-        sources.push({ source, end: chunk.playAt + length });
+        source.start(contextStart + chunk.playAt / rate, chunk.sourceStart, length);
+        sources.push({ source, end: (chunk.playAt + length) / rate });
       }
     });
 
@@ -182,8 +209,17 @@ export class AudioPlayer {
   /** Elapsed context time since the current plan started, converted back to a source-buffer position. */
   private currentSourceSec(): number {
     if (!this.context || !this.plan) return this.editor.playheadSec;
-    const elapsed = clamp(this.context.currentTime - this.planContextStart, 0, this.plan.totalSec);
-    return this.sourceSecAtElapsed(elapsed);
+    return this.sourceSecAtElapsed(this.elapsedPlanSec());
+  }
+
+  /** Context seconds since `planContextStart`, scaled into the plan's 1× timeline. */
+  private elapsedPlanSec(): number {
+    if (!this.context || !this.plan) return 0;
+    return clamp(
+      (this.context.currentTime - this.planContextStart) * this.rate,
+      0,
+      this.plan.totalSec,
+    );
   }
 
   /** Maps a point on the plan's own (gapless) timeline back to where that is in the source recordings. */
@@ -224,8 +260,8 @@ export class AudioPlayer {
   private scheduleTick = (): void => {
     if (!this.editor.isPlaying || !this.context || !this.plan) return;
 
-    const elapsed = this.context.currentTime - this.planContextStart;
-    if (elapsed >= this.plan.totalSec) {
+    const elapsedPlan = this.elapsedPlanSec();
+    if (elapsedPlan >= this.plan.totalSec) {
       this.stopSources();
       this.handleEnded();
       return;
@@ -235,7 +271,7 @@ export class AudioPlayer {
     // never become (or interrupt) an undo step. Contrast with `seek`'s
     // `setPlayhead` call, which backs an undoable click-seek from the
     // waveform and stays outside this wrapper.
-    this.editor.withoutHistory(() => this.editor.setPlayhead(this.sourceSecAtElapsed(elapsed)));
+    this.editor.withoutHistory(() => this.editor.setPlayhead(this.sourceSecAtElapsed(elapsedPlan)));
     this.rafHandle = requestAnimationFrame(this.scheduleTick);
   };
 

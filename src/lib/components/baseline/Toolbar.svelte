@@ -15,6 +15,7 @@
   import IconUndo from "../icons/IconUndo.svelte";
   import IconZoom from "../icons/IconZoom.svelte";
   import IconSettings from "../icons/IconSettings.svelte";
+  import { PLAYBACK_RATES } from "$lib/player";
 
   export type MarkerType = "silence" | "cut" | "export";
   export type ViewMode = "both" | "transcript" | "audio";
@@ -33,6 +34,7 @@
     menuOpen = $bindable(false),
     currentSec = 0,
     durationSec = 0,
+    playbackRate = 1,
     markerType = $bindable<MarkerType>("silence"),
     view = $bindable<ViewMode>("both"),
     preview = $bindable(false),
@@ -48,6 +50,7 @@
     onzoomin,
     onzoomout,
     onfit,
+    onratechange,
   }: {
     canUndo?: boolean;
     canRedo?: boolean;
@@ -62,6 +65,7 @@
     menuOpen?: boolean;
     currentSec?: number;
     durationSec?: number;
+    playbackRate?: number;
     markerType?: MarkerType;
     view?: ViewMode;
     preview?: boolean;
@@ -77,6 +81,7 @@
     onzoomin?: () => void;
     onzoomout?: () => void;
     onfit?: () => void;
+    onratechange?: (rate: number) => void;
   } = $props();
 
   function togglePlay(): void {
@@ -94,6 +99,15 @@
     const minutes = Math.floor(s / 60);
     const seconds = s - minutes * 60;
     return `${minutes.toString().padStart(2, "0")}:${seconds.toFixed(1).padStart(4, "0")}`;
+  }
+
+  function formatRate(rate: number): string {
+    return `${rate}×`;
+  }
+
+  function onSpeedChange(event: Event): void {
+    const value = Number((event.currentTarget as HTMLSelectElement).value);
+    onratechange?.(value);
   }
 </script>
 
@@ -142,6 +156,18 @@
       <span class="sep">/</span>
       <span>{formatTime(durationSec)}</span>
     </span>
+    <select
+      class="speed"
+      aria-label="Playback speed"
+      title="Playback speed"
+      value={playbackRate}
+      disabled={!canPlay}
+      onchange={onSpeedChange}
+    >
+      {#each PLAYBACK_RATES as rate (rate)}
+        <option value={rate}>{formatRate(rate)}</option>
+      {/each}
+    </select>
   </div>
   <div class="divider"></div>
   <div class="group" role="group" aria-label="History">
@@ -419,6 +445,25 @@
   .sep {
     margin: 0 0.2em;
     color: var(--panel-highlight);
+  }
+
+  .speed {
+    margin-left: 0.35rem;
+    height: 24px;
+    padding: 0 0.35rem;
+    border: 1px solid var(--panel-line);
+    border-radius: 4px;
+    background: var(--panel);
+    color: var(--cream-dim);
+    font-family: var(--font-mono);
+    font-size: 0.68rem;
+    line-height: 1;
+    cursor: pointer;
+  }
+
+  .speed:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
   }
 
   .view-group {

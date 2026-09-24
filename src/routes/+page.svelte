@@ -32,6 +32,7 @@
   let menuOpen = $state(false);
   let openAsTranscript = $state(false);
   let windowWidth = $state(1180);
+  let playbackRate = $state(1);
   $effect(() => {
     if (windowWidth < 900) paneOpen = false;
   });
@@ -820,8 +821,13 @@
         playing={editor.isPlaying}
         currentSec={editor.playheadKeptSec}
         durationSec={editor.displayKeptDuration}
+        playbackRate={playbackRate}
         preview={editor.preview === "edited"}
         onplay={() => player.toggle()}
+        onratechange={(rate) => {
+          playbackRate = rate;
+          player.setRate(rate);
+        }}
         onpreview={() => {
           editor.setPreview(
             editor.preview === "edited" ? "original" : "edited",

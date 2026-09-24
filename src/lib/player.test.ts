@@ -16,7 +16,10 @@ const buffer = (duration = 10) =>
 function fakeAudio() {
   const starts: number[] = [];
   const stops: number[] = [];
-  const sources: { onended: (() => void) | null }[] = [];
+  const sources: {
+    onended: (() => void) | null;
+    playbackRate: { value: number };
+  }[] = [];
   const ctx = {
     currentTime: 0,
     destination: {},
@@ -33,6 +36,7 @@ function fakeAudio() {
     createBufferSource() {
       const source = {
         buffer: null as AudioBuffer | null,
+        playbackRate: { value: 1 },
         connect() {},
         disconnect() {},
         start(when = 0) {
@@ -254,5 +258,51 @@ describe("AudioPlayer", () => {
     expect(stops.length).toBeGreaterThan(0);
     expect(starts.length).toBeGreaterThan(started);
     expect(session.isPlaying).toBe(true);
+  });
+
+  it("defaults to 1× playback rate", () => {
+    const playback = new AudioPlayer(new EditorState());
+    expect(playback.playbackRate).toBe(1);
+  });
+
+  it("at 2× sets playbackRate and halves chunk start offsets after a cut", () => {
+    const audio = fakeAudio();
+    const session = new EditorState();
+    session.loadAudio(buffer(2), "a.wav", new Float32Array(32000));
+    session.addCut({ start: 0.5, end: 1.0 });
+    session.setPreview("edited");
+    const playback = new AudioPlayer(session);
+    playback.setRate(2);
+    playback.play();
+
+    expect(audio.sources.every((s) => s.playbackRate.value === 2)).toBe(true);
+    // 1× would start chunks at 0 and 0.5; at 2× those are 0 and 0.25.
+    expect(audio.starts).toEqual([0, 0.25]);
+  });
+
+  it("setRate while playing reschedules and advances playhead at the new rate", () => {
+    const audio = fakeAudio();
+    const session = new EditorState();
+    session.loadAudio(buffer(10), "a.wav", new Float32Array(160000));
+    const playback = new AudioPlayer(session);
+    playback.play();
+    const started = audio.starts.length;
+    playback.setRate(2);
+
+    expect(audio.stops.length).toBeGreaterThan(0);
+    expect(audio.starts.length).toBeGreaterThan(started);
+    expect(playback.playbackRate).toBe(2);
+    expect(session.isPlaying).toBe(true);
+
+    audio.ctx.currentTime = 1;
+    audio.tick();
+    expect(session.playheadSec).toBeCloseTo(2);
+  });
+
+  it("ignores rates outside the allowed presets", () => {
+    const playback = new AudioPlayer(new EditorState());
+    playback.setRate(1.5);
+    playback.setRate(3);
+    expect(playback.playbackRate).toBe(1.5);
   });
 });
