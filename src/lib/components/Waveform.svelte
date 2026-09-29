@@ -40,7 +40,9 @@
 
   let drag: DragTarget | null = null;
   const exportMarks = $derived.by(() =>
-    editor.projectedExports.filter((marker) => marker.laneIds.includes(track.id)),
+    editor.showsMarkerType("export")
+      ? editor.projectedExports.filter((marker) => marker.laneIds.includes(track.id))
+      : [],
   );
 
   const isActive = $derived(editor.activeTrack?.id === track.id);
@@ -114,12 +116,13 @@
       }
     }
     if (exportHit) return { type: "export", id: exportHit.id, edge: exportHit.edge };
-    for (let i = 0; i < editor.cutMarks.length; i++) {
+    if (editor.showsMarkerType("cut")) for (let i = 0; i < editor.cutMarks.length; i++) {
       const applied = editor.cutMarks[i].applied;
       if (!applied) continue;
       for (const edge of ["start", "end"] as const)
         if (Math.abs(x - sourceTimeToX(applied[edge], edge)) <= HIT_RADIUS) return {type:"cut",index:i,edge};
     }
+    if (!editor.showsMarkerType("silence")) return null;
     for (let i = 0; i < track.markers.length; i++) {
       const displayed = track.markers[i].displayed;
       if (!displayed) continue;
@@ -267,6 +270,7 @@
 
   /** Accepted cuts, drawn in place in both previews — the edited preview skips them in playback, not on screen. */
   function drawCuts(ctx: CanvasRenderingContext2D): void {
+    if (!editor.showsMarkerType("cut")) return;
     for (const mark of editor.cutMarks) {
       if (mark.buffered) drawCutExtent(ctx, mark.raw);
       const cut = mark.applied;
@@ -353,6 +357,7 @@
    * instead of stacked on the same pixel.
    */
   function drawMarkers(ctx: CanvasRenderingContext2D): void {
+    if (!editor.showsMarkerType("silence")) return;
     const collapsed = editor.viewFilter === "hideMarked" && editor.preview === "edited";
 
     for (const region of track.markers) {
@@ -494,6 +499,7 @@
     editor.projectedExports;
     editor.playheadSec;
     editor.cutMarks;
+    editor.markerTypeFilter;
     editor.selectionRanges;
     editor.cutScopePreview;
     editor.selectionTrackIds;
@@ -585,18 +591,18 @@
         );
         const cut = editor.cuts.find(r => r.start <= at && r.end > at);
         const silence = track.rawMarkers.find(r => r.start <= at && r.end > at);
-        if (exported) {
+        if (exported && editor.showsMarkerType("export")) {
           editor.markerAction = "export";
           editor.setSelection(exported.start, exported.end, [...exported.laneIds]);
           selectClickedMark(exported.id, drag.additive);
-        } else if (cut) {
+        } else if (cut && editor.showsMarkerType("cut")) {
           editor.markerAction = "cut";
           editor.setSelection(cut.start,cut.end,editor.tracks.map(t => t.id));
           const mark = editor.markerList.all().find(
             (item) => item.type === "cut" && item.start === cut.start && item.end === cut.end,
           );
           if (mark) selectClickedMark(mark.id, drag.additive);
-        } else if (silence) {
+        } else if (silence && editor.showsMarkerType("silence")) {
           editor.markerAction = "silence";
           editor.setSelection(silence.start,silence.end,[track.id]);
           const mark = editor.markerList.all().find(
@@ -649,7 +655,7 @@
       onpointerup={onPointerUp}
       onpointercancel={onPointerUp}
     ></canvas>
-    {#each track.markers as region, index}
+    {#each editor.showsMarkerType("silence") ? track.markers : [] as region, index (index)}
       {#if region.displayed}
         {@const left = sourceTimeToX(region.displayed.start, "start")}
         {@const right = sourceTimeToX(region.displayed.end, "end")}

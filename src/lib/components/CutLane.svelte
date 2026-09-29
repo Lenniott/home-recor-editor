@@ -122,7 +122,7 @@
   </div>
 
   <div class="strip" bind:clientWidth={width} aria-label="Shared cut lane" role="group" onpointerdown={startEdge} onpointermove={moveEdge} onpointerup={endEdge} onpointercancel={endEdge}>
-    {#each editor.cutMarks as mark, cutIndex (mark.id)}
+    {#each editor.showsMarkerType("cut") ? editor.cutMarks : [] as mark, cutIndex (mark.id)}
       {@const cut = mark.applied}
       {@const box = cut ? band(cut) : null}
       {#if mark.buffered}

@@ -11,7 +11,15 @@ vi.mock("../player", () => ({
 vi.stubGlobal(
   "ResizeObserver",
   class {
-    observe(): void {}
+    private callback: ResizeObserverCallback;
+    constructor(callback: ResizeObserverCallback) {
+      this.callback = callback;
+    }
+    observe(target: Element): void {
+      Object.defineProperty(target, "clientWidth", { configurable: true, value: 800 });
+      Object.defineProperty(target, "clientHeight", { configurable: true, value: 80 });
+      this.callback([{ target } as ResizeObserverEntry], this as unknown as ResizeObserver);
+    }
     unobserve(): void {}
     disconnect(): void {}
   },
@@ -34,6 +42,7 @@ HTMLCanvasElement.prototype.getContext = (() =>
     clip() {},
     rect() {},
     scale() {},
+    setLineDash() {},
   }) as unknown as CanvasRenderingContext2D) as unknown as typeof HTMLCanvasElement.prototype.getContext;
 
 let component: ReturnType<typeof mount>;
@@ -97,5 +106,28 @@ describe("compact audio strip", () => {
     );
     flushSync();
     expect(editor.selectedMarkIds).toEqual(ids);
+  });
+
+  it("the marks-list type filter hides every other marker on the timeline", () => {
+    editor.setBufferMs(0);
+    editor.setSelection(1, 2);
+    editor.markSelection(editor.tracks[0]);
+    editor.addCut({ start: 3, end: 4 });
+    editor.markerAction = "export";
+    editor.setSelection(5, 6, [editor.tracks[0].id]);
+    editor.markAction();
+    component = mount(TimelineStack, { target, props: { compact: false } });
+    flushSync();
+
+    expect(target.querySelectorAll("[data-silence-mark]").length).toBeGreaterThan(0);
+    expect(target.querySelectorAll("[data-export-mark]").length).toBeGreaterThan(0);
+    expect(target.querySelectorAll(".mark.cut").length).toBeGreaterThan(0);
+
+    editor.markerTypeFilter = "silence";
+    flushSync();
+
+    expect(target.querySelectorAll("[data-silence-mark]").length).toBeGreaterThan(0);
+    expect(target.querySelectorAll("[data-export-mark]")).toHaveLength(0);
+    expect(target.querySelectorAll(".mark.cut")).toHaveLength(0);
   });
 });

@@ -18,7 +18,6 @@
     }
   }
 
-  let typeFilter = $state<"all" | MarkerType>("all");
   let anchorId = $state<string | null>(null);
 
   const marks = $derived.by(() => {
@@ -26,7 +25,7 @@
     editor.cutMarks;
     return editor.markerList.all();
   });
-  const visible = $derived(marks.filter((mark) => typeFilter === "all" || mark.type === typeFilter));
+  const visible = $derived(marks.filter((mark) => editor.showsMarkerType(mark.type)));
 
   function format(n: number): string {
     return n.toFixed(1);
@@ -94,7 +93,7 @@
 
 <div class="filter" role="radiogroup" aria-label="Marker type">
   {#each [["all", "All"], ["silence", "Silence"], ["cut", "Cuts"], ["export", "Export"]] as [value, name] (value)}
-    <button type="button" aria-pressed={typeFilter === value} onclick={() => (typeFilter = value as "all" | MarkerType)}>{name}</button>
+    <button type="button" aria-pressed={editor.markerTypeFilter === value} onclick={() => (editor.markerTypeFilter = value as "all" | MarkerType)}>{name}</button>
   {/each}
   <button type="button" onclick={selectVisible} disabled={visible.length === 0}>Select all</button>
 </div>
@@ -116,6 +115,7 @@
       role="option"
       aria-selected={editor.selectedMarkIds.includes(mark.id)}
       onclick={(event) => clickMark(event, mark.id)}
+      ondblclick={() => editor.showMark(mark.id)}
     >
       {label(mark)}
     </button>

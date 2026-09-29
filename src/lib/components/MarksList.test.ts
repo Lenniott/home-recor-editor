@@ -93,6 +93,7 @@ describe("marks list", () => {
     press("Cuts");
 
     expect(rows().map((row) => row.textContent)).toEqual(["cut 5.0 – 6.0 s"]);
+    expect(editor.markerTypeFilter).toBe("cut");
   });
 
   it("shift-click selects the rows between the last click and this one", () => {
@@ -120,6 +121,21 @@ describe("marks list", () => {
     press("Select all");
 
     expect(editor.selectedMarkIds).toEqual([editor.markerList.all().find((mark) => mark.type === "cut")!.id]);
+  });
+
+  it("double-clicking a mark fits the timeline around it", () => {
+    editor.addCut({ start: 5, end: 6 });
+    editor.setView(0, 1);
+    editor.setViewFilter("hideMarked");
+    component = mount(MarksList, { target });
+    flushSync();
+
+    rows()[0].dispatchEvent(new MouseEvent("dblclick", { bubbles: true }));
+    flushSync();
+
+    expect(editor.viewFilter).toBe("all");
+    expect(editor.viewStartSec).toBeCloseTo(4);
+    expect(editor.viewDurationSec).toBeCloseTo(4);
   });
 
   it("the cut buffer slider trims the selected cuts that were already made and shows their new bounds", () => {

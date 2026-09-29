@@ -379,6 +379,8 @@ export class EditorState {
   selectionRanges: { trackId: string; start: number; end: number }[] = $state([]);
   cutScopePreview = $state(false);
   markerAction: "silence" | "cut" | "export" = $state("silence");
+  /** Which marker type the list and the timeline are showing. "all" paints every type. */
+  markerTypeFilter: "all" | MarkerType = $state("all");
   markerList = new MarkerList();
   /** Reactive snapshot of export marks so the waveform can paint ticks without reading the list internals. */
   projectedExports: TimelineMarker[] = $state([]);
@@ -848,6 +850,7 @@ export class EditorState {
 
   private resetSessionState(durationSec: number): void {
     this.markerAction = "silence";
+    this.markerTypeFilter = "all";
     this.clearSelection();
     this.selectedMarkIds = [];
     this.playheadSec = 0;
@@ -1554,6 +1557,24 @@ export class EditorState {
       this.setView(sourceToKept(this.timelineSpans, startSec), durationSec);
     });
     return region.start;
+  }
+
+  /**
+   * Zoom so this mark sits in the timeline window. Forces `viewFilter`
+   * back to "all" first — a hidden mark has no kept width to frame.
+   */
+  showsMarkerType(type: MarkerType): boolean {
+    return this.markerTypeFilter === "all" || this.markerTypeFilter === type;
+  }
+
+  showMark(id: string): void {
+    const mark = this.markerList.all().find((item) => item.id === id);
+    if (!mark) return;
+    this.commitEdit(() => {
+      this.viewFilter = "all";
+      const { startSec, durationSec } = fitWindow(mark, this.durationSec);
+      this.setView(sourceToKept(this.timelineSpans, startSec), durationSec);
+    });
   }
 }
 
